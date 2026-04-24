@@ -1,0 +1,7 @@
+.env
+last_ticket_id.txt
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+data/
