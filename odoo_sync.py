@@ -19,6 +19,24 @@ WHAI_CLIENT_KEY = os.environ.get("WHAI_CLIENT_KEY")
 WHAI_BOT_ID = os.environ.get("WHAI_BOT_ID")
 WHAI_GROUP_ID = os.environ.get("WHAI_GROUP_ID")
 
+# Validar que todas las variables estén presentes
+required_vars = {
+    "ODOO_URL": ODOO_URL,
+    "ODOO_DB": ODOO_DB,
+    "ODOO_USER": ODOO_USER,
+    "ODOO_PASSWORD": ODOO_PASSWORD,
+    "WHAI_URL": WHAI_URL,
+    "WHAI_CLIENT_KEY": WHAI_CLIENT_KEY,
+    "WHAI_BOT_ID": WHAI_BOT_ID,
+    "WHAI_GROUP_ID": WHAI_GROUP_ID,
+}
+
+for var_name, var_value in required_vars.items():
+    if not var_value:
+        print(f"❌ Error crítico: Falta la variable de entorno {var_name}")
+        exit(1)
+
+
 # Estado persistente: si estamos en Docker usamos /app/data, si es local usamos la carpeta actual
 if os.path.exists("/app/data"):
     STATE_FILE = "/app/data/last_ticket_id.txt"
