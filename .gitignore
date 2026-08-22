@@ -1,5 +1,6 @@
 .env
 last_ticket_id.txt
+integrations_config.json
 __pycache__/
 *.pyc
 *.pyo

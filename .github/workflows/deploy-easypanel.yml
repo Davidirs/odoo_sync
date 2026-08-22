@@ -1,0 +1,20 @@
+name: Deploy to Easypanel
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Easypanel Deploy Webhook (Main)
+        if: github.ref_name == 'main'
+        run: |
+          URL="${{ secrets.EASYPANEL_WEBHOOK_MAIN_URL }}"
+          if [ -z "$URL" ]; then
+            echo "::error::Secret EASYPANEL_WEBHOOK_MAIN_URL is not configured."
+            exit 1
+          fi
+          curl -s -S --fail -X POST "$URL"
