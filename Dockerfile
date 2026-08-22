@@ -1,18 +1,19 @@
-# Usar una imagen oficial de Python ligera
 FROM python:3.11-slim
 
-# Establecer el directorio de trabajo
 WORKDIR /app
 
-# Copiar los requerimientos e instalarlos
+# Instalar dependencias
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el script
-COPY odoo_sync.py .
+# Copiar todo el código de la aplicación (templates, static, scripts)
+COPY . .
 
-# Crear la carpeta data donde vivirá el estado persistente
+# Carpeta para datos persistentes
 RUN mkdir -p /app/data
 
-# Comando para ejecutar el script
-CMD ["python", "-u", "odoo_sync.py"]
+# Puerto por defecto para la interfaz web
+EXPOSE 5050
+
+# Iniciar servidor de producción con Gunicorn
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5050", "--timeout", "120", "app:app"]
