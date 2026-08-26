@@ -103,6 +103,12 @@ def index():
     )
 
 
+@app.route("/health", methods=["GET"])
+@app.route("/healthz", methods=["GET"])
+def health_check():
+    return jsonify({"status": "ok", "service": "odoo-ticket-hub"})
+
+
 @app.route("/api/config", methods=["GET"])
 def get_config():
     return jsonify({

@@ -7,34 +7,18 @@ from dotenv import load_dotenv
 # Cargar variables desde el archivo .env
 load_dotenv()
 
-# --- CONFIGURACIÓN ---
-ODOO_URL = os.environ.get("ODOO_URL")
-ODOO_DB = os.environ.get("ODOO_DB")
-ODOO_USER = os.environ.get("ODOO_USER")
-ODOO_PASSWORD = os.environ.get("ODOO_PASSWORD")
-
-# Whatsapp API Config
-WHAI_URL = os.environ.get("WHAI_URL")
-WHAI_CLIENT_KEY = os.environ.get("WHAI_CLIENT_KEY")
-WHAI_BOT_ID = os.environ.get("WHAI_BOT_ID")
-WHAI_GROUP_ID = os.environ.get("WHAI_GROUP_ID")
-
-# Validar que todas las variables estén presentes
-required_vars = {
-    "ODOO_URL": ODOO_URL,
-    "ODOO_DB": ODOO_DB,
-    "ODOO_USER": ODOO_USER,
-    "ODOO_PASSWORD": ODOO_PASSWORD,
-    "WHAI_URL": WHAI_URL,
-    "WHAI_CLIENT_KEY": WHAI_CLIENT_KEY,
-    "WHAI_BOT_ID": WHAI_BOT_ID,
-    "WHAI_GROUP_ID": WHAI_GROUP_ID,
-}
-
-for var_name, var_value in required_vars.items():
-    if not var_value:
-        print(f"❌ Error crítico: Falta la variable de entorno {var_name}")
-        exit(1)
+def get_config():
+    """Obtener y validar variables de entorno necesarias."""
+    return {
+        "ODOO_URL": os.environ.get("ODOO_URL"),
+        "ODOO_DB": os.environ.get("ODOO_DB"),
+        "ODOO_USER": os.environ.get("ODOO_USER"),
+        "ODOO_PASSWORD": os.environ.get("ODOO_PASSWORD"),
+        "WHAI_URL": os.environ.get("WHAI_URL"),
+        "WHAI_CLIENT_KEY": os.environ.get("WHAI_CLIENT_KEY"),
+        "WHAI_BOT_ID": os.environ.get("WHAI_BOT_ID"),
+        "WHAI_GROUP_ID": os.environ.get("WHAI_GROUP_ID"),
+    }
 
 
 # Estado persistente: si estamos en Docker usamos /app/data, si es local usamos la carpeta actual
@@ -57,16 +41,31 @@ def save_last_processed_id(ticket_id):
 
 
 def main():
+    config = get_config()
+    missing = [k for k, v in config.items() if not v]
+    if missing:
+        print(f"⚠️ [Worker Sync] Variables de entorno faltantes: {', '.join(missing)}. Reintentando en 60s...")
+        return
+
+    odoo_url = config["ODOO_URL"]
+    odoo_db = config["ODOO_DB"]
+    odoo_user = config["ODOO_USER"]
+    odoo_password = config["ODOO_PASSWORD"]
+    whai_url = config["WHAI_URL"]
+    whai_client_key = config["WHAI_CLIENT_KEY"]
+    whai_bot_id = config["WHAI_BOT_ID"]
+    whai_group_id = config["WHAI_GROUP_ID"]
+
     try:
         # 1. Autenticación
-        common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
-        uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_PASSWORD, {})
+        common = xmlrpc.client.ServerProxy(f"{odoo_url}/xmlrpc/2/common")
+        uid = common.authenticate(odoo_db, odoo_user, odoo_password, {})
 
         if not uid:
-            print("Error: Fallo la autenticación con Odoo.")
+            print("Error: Falló la autenticación con Odoo.")
             return
 
-        models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
+        models = xmlrpc.client.ServerProxy(f"{odoo_url}/xmlrpc/2/object")
 
         # 2. Leer el estado actual
         last_id = get_last_processed_id()
@@ -74,9 +73,9 @@ def main():
         # Si es la primera vez (last_id == 0), buscamos el ticket más reciente para establecer el punto de partida
         if last_id == 0:
             latest_ticket = models.execute_kw(
-                ODOO_DB,
+                odoo_db,
                 uid,
-                ODOO_PASSWORD,
+                odoo_password,
                 "helpdesk.ticket",
                 "search",
                 [[]],
@@ -94,9 +93,9 @@ def main():
 
         # Aseguramos el orden ascendente para procesar del más viejo al más nuevo
         new_ticket_ids = models.execute_kw(
-            ODOO_DB,
+            odoo_db,
             uid,
-            ODOO_PASSWORD,
+            odoo_password,
             "helpdesk.ticket",
             "search",
             [domain],
@@ -108,12 +107,11 @@ def main():
             return
 
         # 4. Obtener los detalles de los tickets nuevos
-        # 4. Obtener los detalles de los tickets nuevos
         # Incluimos 'user_id', 'partner_id' y 'priority'
         tickets_data = models.execute_kw(
-            ODOO_DB,
+            odoo_db,
             uid,
-            ODOO_PASSWORD,
+            odoo_password,
             "helpdesk.ticket",
             "read",
             [new_ticket_ids],
@@ -162,19 +160,19 @@ def main():
 
                 headers = {
                     "Content-Type": "application/json",
-                    "x-client-key": WHAI_CLIENT_KEY,
-                    "x-client-botid": WHAI_BOT_ID,
+                    "x-client-key": whai_client_key,
+                    "x-client-botid": whai_bot_id,
                 }
 
                 payload = {
-                    "to": WHAI_GROUP_ID,
+                    "to": whai_group_id,
                     "message": message,
                     "fromMe": "Script de Alerta",
                 }
 
                 # Ejecutar tu POST
                 response = requests.post(
-                    WHAI_URL, headers=headers, json=payload, timeout=10
+                    whai_url, headers=headers, json=payload, timeout=10
                 )
                 response.raise_for_status()
                 print(f"POST exitoso para el ticket {ticket['id']} - {ticket['name']}")
