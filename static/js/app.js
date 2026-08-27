@@ -735,19 +735,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (data.success) {
                 lastAiResponseText = data.analysis;
-                elements.aiTextBox.textContent = data.analysis;
+                elements.aiTextBox.innerHTML = formatAiResponse(data.analysis);
                 elements.aiLoading.classList.add("hidden");
                 elements.aiContent.classList.remove("hidden");
             } else {
                 elements.aiLoading.classList.add("hidden");
                 elements.aiContent.classList.remove("hidden");
-                elements.aiTextBox.innerHTML = `<span style="color: var(--accent-rose);">⚠️ ${data.error || "No se pudo generar el análisis."}</span>\n\nPor favor verifica tu API Key en Ajustes > Integraciones.`;
+                elements.aiTextBox.innerHTML = `<span style="color: var(--accent-rose);">⚠️ ${data.error || "No se pudo generar el análisis."}</span><br><br>Por favor verifica tu API Key en Ajustes > Integraciones.`;
                 lastAiResponseText = data.error || "";
             }
         } catch (e) {
             elements.aiLoading.classList.add("hidden");
             elements.aiContent.classList.remove("hidden");
-            elements.aiTextBox.textContent = "Error de red al comunicarse con Groq IA.";
+            elements.aiTextBox.innerHTML = "<span style='color: var(--accent-rose);'>Error de red al comunicarse con Groq IA.</span>";
         }
         updateIcons();
     }
@@ -763,11 +763,67 @@ document.addEventListener("DOMContentLoaded", () => {
 
     elements.aiBtnCopy.addEventListener("click", () => {
         if (lastAiResponseText) {
-            navigator.clipboard.writeText(lastAiResponseText).then(() => {
-                showToast("📋 Análisis de IA copiado al portapapeles");
+            const cleanText = cleanTextForClipboard(lastAiResponseText);
+            navigator.clipboard.writeText(cleanText).then(() => {
+                showToast("📋 Análisis copiado al portapapeles");
             });
         }
     });
+
+    function formatAiResponse(raw) {
+        if (!raw) return "";
+
+        // Strip reasoning tags if present
+        let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+        // Convert headers (###, ##, #) to clean section titles
+        text = text.replace(/^(?:###|##|#)\s*(?:[0-9️⃣]*\s*)?(.*?)$/gm, '<div class="ai-section-title">$1</div>');
+
+        // Convert blockquotes (> ...) to response quote boxes
+        text = text.replace(/(?:^>[ \t]*(.*?)(?:\n|$))+/gm, (match) => {
+            const inner = match.replace(/^>[ \t]*/gm, "").trim().replace(/\n/g, "<br>");
+            return `<div class="ai-quote-box">${inner}</div>`;
+        });
+
+        // Convert bullet points (- or *) to clean list items
+        text = text.replace(/^[ \t]*[-*•]\s+(.*?)$/gm, '<div class="ai-list-item"><span class="ai-bullet">▪</span><span>$1</span></div>');
+
+        // Convert numbered list items (1., 2., etc)
+        text = text.replace(/^[ \t]*(\d+)\.\s+(.*?)$/gm, '<div class="ai-list-item"><span class="ai-num">$1.</span><span>$2</span></div>');
+
+        // Bold **text** -> <strong>text</strong> (removes double asterisks)
+        text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+        // Italic *text* -> <em>text</em>
+        text = text.replace(/(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+        // Clean up markdown divider lines ---
+        text = text.replace(/^---+$/gm, '<hr class="ai-divider">');
+
+        // Wrap loose paragraphs cleanly
+        const blocks = text.split(/\n{2,}/).map(block => {
+            block = block.trim();
+            if (!block) return "";
+            if (block.startsWith("<div") || block.startsWith("<hr") || block.startsWith("<strong")) {
+                return block;
+            }
+            return `<p class="ai-paragraph">${block.replace(/\n/g, "<br>")}</p>`;
+        }).filter(Boolean);
+
+        return blocks.join("\n");
+    }
+
+    function cleanTextForClipboard(raw) {
+        if (!raw) return "";
+        return raw
+            .replace(/<think>[\s\S]*?<\/think>/gi, "")
+            .replace(/^(?:###|##|#)\s*/gm, "")
+            .replace(/\*\*(.*?)\*\*/g, "$1")
+            .replace(/(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)/g, "$1")
+            .replace(/^---+$/gm, "----------------------------------------")
+            .replace(/^>[ \t]*/gm, "")
+            .trim();
+    }
 
     // WhatsApp Format Copy
     function copyWhatsAppFormat(ticket) {

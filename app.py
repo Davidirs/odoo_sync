@@ -471,22 +471,27 @@ def analyze_ticket_with_ai():
     system_prompt = config.get("groq_system_prompt")
 
     user_prompt = f"""
-Analiza el siguiente ticket de soporte de Odoo:
+Analiza el siguiente ticket de soporte técnico:
 
-- **ID Ticket:** #{ticket_id}
-- **Asunto:** {ticket_name}
-- **Cliente / Contacto:** {client_name}
-- **Asesor Asignado:** {assigned_name}
-- **Etapa actual:** {stage_name}
-- **Prioridad (0 a 3):** {priority}
-- **Descripción / Detalle del cliente:**
+Caso: #{ticket_id} - {ticket_name}
+Cliente: {client_name}
+Asesor asignado: {assigned_name}
+Etapa: {stage_name} | Prioridad: {priority}/3
+Detalle:
 {raw_desc}
 
-Por favor genera una respuesta estructurada con:
-1. 📌 **Resumen Ejecutivo** (en 2 líneas).
-2. ⚠️ **Diagnóstico & Criticidad** (urgencia estimada, posible causa raíz).
-3. 🛠️ **Pasos Recomendados para el Asesor** (acciones concretas a tomar en Odoo / sistemas).
-4. 💬 **Borrador de Respuesta para el Cliente** (mensaje listo para enviar por WhatsApp o correo, tono empático y resolutivo).
+Genera un reporte técnico claro y profesional con las siguientes secciones:
+### Resumen del Caso
+(Síntesis clara en 2 líneas)
+
+### Diagnóstico y Severidad
+(Causa raíz técnica y nivel de impacto)
+
+### Plan de Acción
+(Pasos concretos para resolver en Odoo o plataformas)
+
+### Propuesta de Respuesta al Cliente
+(Borrador directo y empático listo para enviar por WhatsApp o correo)
 """
 
     try:
