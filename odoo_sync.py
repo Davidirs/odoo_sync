@@ -170,23 +170,27 @@ def main():
                     "fromMe": "Script de Alerta",
                 }
 
-                # Ejecutar tu POST
-                response = requests.post(
-                    whai_url, headers=headers, json=payload, timeout=10
-                )
-                response.raise_for_status()
-                print(f"POST exitoso para el ticket {ticket['id']} - {ticket['name']}")
+                # Ejecutar POST con captura detallada de errores
+                try:
+                    response = requests.post(
+                        whai_url, headers=headers, json=payload, timeout=10
+                    )
+                    if response.status_code >= 400:
+                        print(
+                            f"❌ Error al enviar alerta para Ticket {ticket['id']} (Status {response.status_code}): {response.text}"
+                        )
+                    else:
+                        print(f"✅ POST exitoso para el ticket {ticket['id']} - {ticket['name']}")
+                except requests.exceptions.RequestException as req_err:
+                    print(f"❌ Error de red al enviar webhook para Ticket {ticket['id']}: {req_err}")
             else:
                 print(f"Ticket {ticket['id']} ignorado (Etapa: {stage_name})")
 
-            # Importante: Guardar el ID actualizado independientemente de si se envió el POST o no,
-            # para no volver a evaluarlo en el futuro.
+            # Importante: Guardar el ID actualizado para no quedar atrapados en un bucle infinito
             save_last_processed_id(ticket["id"])
 
-    except requests.exceptions.RequestException as re:
-        print(f"Error de red al enviar el webhook: {re}")
     except Exception as e:
-        print(f"Error crítico en la ejecución: {e}")
+        print(f"Error crítico en la ejecución del worker: {e}")
 
 
 if __name__ == "__main__":
