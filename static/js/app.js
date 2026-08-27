@@ -684,6 +684,9 @@ document.addEventListener("DOMContentLoaded", () => {
             renderReportTable(data.tickets);
             elements.reportTableCard.classList.remove("hidden");
 
+            // Render Section 1 (Volumen de Casos Table & Chart)
+            renderVolumeSection(data.type_counts || {}, data.total_tickets, data.month_name, data.year);
+
             // 2. Generate AI Report (Image 2 replica) if requested
             if (withAi) {
                 const aiRes = await fetch("/api/reports/generate-ai-report", {
@@ -699,12 +702,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (aiData.success && aiData.report) {
                     state.aiReport = aiData.report;
-                    renderExecutiveReportDoc(aiData.report, data.tickets);
+                    renderExecutiveReportDoc(
+                        aiData.report, 
+                        data.tickets, 
+                        data.type_counts || {}, 
+                        data.total_tickets, 
+                        data.month_name, 
+                        data.year
+                    );
                     elements.executiveReportCard.classList.remove("hidden");
                     showToast("✨ Informe generado con éxito con Groq IA");
                 } else {
                     showToast(`⚠️ ${aiData.error || "No se pudo generar el texto del informe con IA"}`);
                 }
+            } else {
+                // When only listing tickets, show executive doc with volume section ready
+                elements.executiveReportCard.classList.remove("hidden");
             }
 
         } catch (err) {
@@ -742,14 +755,120 @@ document.addEventListener("DOMContentLoaded", () => {
         updateIcons();
     }
 
-    function renderExecutiveReportDoc(report, rawTickets) {
-        // Section Header
-        elements.docSectionHeader.textContent = report.section_header || "1. RESUMEN DE SOPORTE";
+    let volumeChartInstance = null;
+
+    function renderVolumeSection(typeCounts, totalTickets, monthName, year) {
+        // 1. Update Month in Intro
+        const monthLbl = document.getElementById("doc-volume-month-label");
+        if (monthLbl) monthLbl.textContent = monthName;
+
+        // 2. Render Distribution Table
+        const tbody = document.getElementById("volume-table-tbody");
+        const totalEl = document.getElementById("volume-total-val");
         
-        // Intro paragraph
+        let rowsHtml = "";
+        const sortedKeys = Object.keys(typeCounts).sort();
+        sortedKeys.forEach(type => {
+            rowsHtml += `
+            <tr>
+                <td>${escapeHtml(type)}</td>
+                <td class="td-count">${typeCounts[type]}</td>
+            </tr>
+            `;
+        });
+        if (tbody) tbody.innerHTML = rowsHtml;
+        if (totalEl) totalEl.textContent = totalTickets;
+
+        // 3. Render Bar Chart (Image Replica)
+        const chartTitle = document.getElementById("volume-chart-title");
+        if (chartTitle) chartTitle.textContent = `Tipo de caso - ${monthName} ${year}`;
+
+        const canvas = document.getElementById("volume-chart-canvas");
+        if (canvas && window.Chart) {
+            if (volumeChartInstance) {
+                volumeChartInstance.destroy();
+            }
+
+            const ctx = canvas.getContext("2d");
+            const maxVal = Math.max(...Object.values(typeCounts), 1);
+
+            volumeChartInstance = new window.Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels: sortedKeys,
+                    datasets: [{
+                        label: "Tipo de caso",
+                        data: sortedKeys.map(k => typeCounts[k]),
+                        backgroundColor: "#3b82f6",
+                        borderColor: "#2563eb",
+                        borderWidth: 1,
+                        borderRadius: 2,
+                        barThickness: 38,
+                        maxBarThickness: 45
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 600 },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: "bottom",
+                            labels: {
+                                font: { family: "Inter", size: 12 },
+                                boxWidth: 12,
+                                color: "#475569"
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ` ${context.dataset.label}: ${context.raw} caso(s)`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            suggestedMax: maxVal + 1,
+                            ticks: {
+                                stepSize: 1,
+                                precision: 0,
+                                color: "#64748b",
+                                font: { size: 11 }
+                            },
+                            grid: {
+                                color: "#e2e8f0"
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                color: "#475569",
+                                font: { size: 12, weight: "500" }
+                            },
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    function renderExecutiveReportDoc(report, rawTickets, typeCounts, totalTickets, monthName, year) {
+        // Section 1: Volumen de Casos
+        renderVolumeSection(typeCounts, totalTickets, monthName, year);
+
+        // Section 2: Resumen de Soporte Header
+        elements.docSectionHeader.innerHTML = "2. &nbsp; RESUMEN DE SOPORTE";
+        
+        // Section 2: Intro paragraph
         elements.docIntroText.textContent = report.intro || "";
 
-        // Ticket Items (Exact layout of Image 2)
+        // Section 2: Ticket Items (Exact layout of Image 2)
         const itemsHtml = (report.tickets || []).map(t => {
             const matchedRaw = rawTickets.find(r => r.id === t.id);
             const odooUrl = matchedRaw ? matchedRaw.odoo_url : "#";
@@ -772,10 +891,22 @@ document.addEventListener("DOMContentLoaded", () => {
     // Copy Full Report Text formatted for Word/Docs/Email
     if (elements.btnCopyReportText) {
         elements.btnCopyReportText.addEventListener("click", () => {
-            const header = elements.docSectionHeader.innerText.trim();
-            const intro = elements.docIntroText.innerText.trim();
+            const volIntro = document.getElementById("doc-volume-intro")?.innerText.trim() || "";
+            const sec2Header = elements.docSectionHeader?.innerText.trim() || "2. RESUMEN DE SOPORTE";
+            const sec2Intro = elements.docIntroText?.innerText.trim() || "";
             
-            let fullText = `${header}\n\n${intro}\n\n`;
+            // Section 1 Table Text
+            let volTableText = "Tipo de caso\tCantidad\n";
+            document.querySelectorAll("#volume-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 2) {
+                    volTableText += `${tds[0].innerText.trim()}\t${tds[1].innerText.trim()}\n`;
+                }
+            });
+            const totalVal = document.getElementById("volume-total-val")?.innerText.trim() || "0";
+            volTableText += `Total\t${totalVal}\n`;
+
+            let fullText = `1. VOLUMEN DE CASOS\n\n${volIntro}\n\n${volTableText}\n\n${sec2Header}\n\n${sec2Intro}\n\n`;
 
             document.querySelectorAll(".report-doc-item").forEach(item => {
                 const title = item.querySelector(".report-item-title-link")?.innerText.trim();

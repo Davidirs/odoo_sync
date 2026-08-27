@@ -10,6 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js for Executive Bar Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -394,20 +396,67 @@
 
                     <!-- Printable Document Container -->
                     <div class="printable-doc" id="printable-report-area">
-                        <!-- Orange Section Header Bar (1. RESUMEN DE SOPORTE) -->
-                        <div class="report-section-banner" id="doc-section-header">
-                            1. RESUMEN DE SOPORTE
+                        
+                        <!-- ================= SECTION 1: VOLUMEN DE CASOS ================= -->
+                        <div class="report-section-block">
+                            <!-- Orange Section Header Bar (1. VOLUMEN DE CASOS) -->
+                            <div class="report-section-banner">
+                                1. &nbsp; VOLUMEN DE CASOS
+                            </div>
+
+                            <!-- Intro Paragraph -->
+                            <div class="report-doc-intro" id="doc-volume-intro" contenteditable="true" title="Clic para editar texto">
+                                Se comparte la cantidad de casos para este cliente de acuerdo con los tipos de casos abiertos en el mes de <span id="doc-volume-month-label">Julio</span>.
+                            </div>
+
+                            <!-- Volume Distribution Table (Image Exact Replica) -->
+                            <div class="volume-table-wrapper">
+                                <table class="volume-doc-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tipo de caso</th>
+                                            <th class="th-count">Cantidad</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="volume-table-tbody">
+                                        <!-- Injected distribution rows -->
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="volume-total-row">
+                                            <td><strong>Total</strong></td>
+                                            <td class="td-count"><strong id="volume-total-val">0</strong></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+
+                            <!-- Chart Box (Image Exact Replica) -->
+                            <div class="volume-chart-card">
+                                <div class="chart-title" id="volume-chart-title">Tipo de caso - Julio 2026</div>
+                                <div class="chart-canvas-wrapper">
+                                    <canvas id="volume-chart-canvas"></canvas>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Intro Paragraph with counts and breakdown -->
-                        <div class="report-doc-intro" id="doc-intro-text" contenteditable="true" title="Clic para editar texto">
-                            Durante el mes se aperturaron los siguientes casos...
+                        <!-- ================= SECTION 2: RESUMEN DE SOPORTE ================= -->
+                        <div class="report-section-block">
+                            <!-- Orange Section Header Bar (2. RESUMEN DE SOPORTE) -->
+                            <div class="report-section-banner" id="doc-section-header">
+                                2. &nbsp; RESUMEN DE SOPORTE
+                            </div>
+
+                            <!-- Intro Paragraph with counts and breakdown -->
+                            <div class="report-doc-intro" id="doc-intro-text" contenteditable="true" title="Clic para editar texto">
+                                Durante el mes de Julio de 2026 se aperturaron 10 casos para este cliente, un breve resumen de ellos es el siguiente:
+                            </div>
+
+                            <!-- Ticket Items List (Title Orange + ID & Summary) -->
+                            <div class="report-doc-items" id="doc-items-container">
+                                <!-- Items injected dynamically -->
+                            </div>
                         </div>
 
-                        <!-- Ticket Items List (Title Orange + ID & Summary) -->
-                        <div class="report-doc-items" id="doc-items-container">
-                            <!-- Items injected dynamically -->
-                        </div>
                     </div>
                 </div>
 

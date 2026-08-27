@@ -622,10 +622,20 @@ def get_monthly_tickets():
         total_hours = 0.0
         formatted_tickets = []
 
+        TYPE_TRANSLATIONS = {
+            "request": "Requerimiento",
+            "incident": "Incidente",
+            "question": "Preguntas",
+            "change": "Cambio",
+            "problem": "Problema",
+            "support": "Soporte"
+        }
+
         for t in tickets:
             ticket_id = t["id"]
             type_data = t.get("ticket_type_id")
-            type_name = type_data[1] if type_data else "Request"
+            raw_type = type_data[1] if type_data else "Requerimiento"
+            type_name = TYPE_TRANSLATIONS.get(raw_type.lower(), raw_type)
             type_counts[type_name] = type_counts.get(type_name, 0) + 1
 
             hours = float(t.get("total_hours_spent") or 0.0)
@@ -678,6 +688,7 @@ def get_monthly_tickets():
         return jsonify({
             "success": True,
             "period": month_label,
+            "month_name": MONTH_NAMES_ES[month],
             "year": year,
             "month": month,
             "total_tickets": len(formatted_tickets),
@@ -717,7 +728,7 @@ def generate_monthly_ai_report():
     type_counts = {}
     tickets_prompt_list = []
     for idx, t in enumerate(tickets, 1):
-        ttype = t.get("type", "Request")
+        ttype = t.get("type", "Requerimiento")
         type_counts[ttype] = type_counts.get(ttype, 0) + 1
         
         notes_str = "\n   - ".join(t.get("notes") or []) if t.get("notes") else "Sin notas adicionales."
@@ -730,12 +741,12 @@ def generate_monthly_ai_report():
         )
 
     # Breakdown text helper
-    type_breakdown_parts = [f"{cnt} como {k.lower()}" for k, cnt in type_counts.items()]
+    type_breakdown_parts = [f"{cnt} de ellos como {k.lower()}" if idx == 0 else f"{cnt} como {k.lower()}" for idx, (k, cnt) in enumerate(type_counts.items())]
     type_breakdown_str = ", ".join(type_breakdown_parts)
 
     prompt = f"""
 Eres un redactor técnico senior de informes ejecutivos de soporte TI para clientes corporativos.
-Genera el 'RESUMEN DE SOPORTE' mensual para el cliente '{client_name}' del período '{period_label}'.
+Genera la sección '2. RESUMEN DE SOPORTE' mensual para el cliente '{client_name}' del período '{period_label}'.
 
 Datos estadísticos:
 - Total casos aperturados en el mes: {len(tickets)}
@@ -745,8 +756,8 @@ Casos registrados en Odoo con sus logs y notas de resolución:
 {chr(10).join(tickets_prompt_list)}
 
 Instrucciones estrictas:
-1. 'section_header': Debe ser '1. RESUMEN DE SOPORTE'
-2. 'intro': Un párrafo claro con el conteo: 'Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:'
+1. 'section_header': Debe ser '2. RESUMEN DE SOPORTE'
+2. 'intro': Un párrafo con el estilo: 'Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:'
 3. 'tickets': Una lista ordenada donde para CADA ticket devuelves:
    - 'id': número de ID
    - 'title': título exacto del caso
@@ -754,7 +765,7 @@ Instrucciones estrictas:
 
 Responde ÚNICAMENTE en formato JSON válido con esta estructura:
 {{
-  "section_header": "1. RESUMEN DE SOPORTE",
+  "section_header": "2. RESUMEN DE SOPORTE",
   "intro": "Durante el mes de...",
   "tickets": [
     {{
