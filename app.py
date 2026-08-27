@@ -50,7 +50,7 @@ def load_integrations_config():
     config = {
         "groq_api_key": os.environ.get("GROQ_API_KEY", ""),
         "groq_base_url": os.environ.get("GROQ_BASE_URL", ""),
-        "groq_model": os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "groq_model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
         "groq_system_prompt": (
             "Eres un asistente de soporte técnico senior experto en Odoo Helpdesk y atención al cliente. "
             "Tu tarea es analizar el ticket de soporte proporcionado y entregar un análisis estructurado en español, "
@@ -375,7 +375,7 @@ def get_settings():
         "groq_configured": bool(api_key),
         "groq_masked_key": masked_key,
         "groq_base_url": config.get("groq_base_url", ""),
-        "groq_model": config.get("groq_model", "llama-3.3-70b-versatile"),
+        "groq_model": config.get("groq_model", "openai/gpt-oss-120b"),
         "groq_system_prompt": config.get("groq_system_prompt", "")
     })
 
@@ -385,11 +385,11 @@ def save_groq_settings():
     data = request.get_json() or {}
     api_key = data.get("api_key", "").strip()
     base_url = data.get("base_url", "").strip()
-    model = data.get("model", "llama-3.3-70b-versatile").strip()
+    model = data.get("model", "openai/gpt-oss-120b").strip()
     prompt = data.get("system_prompt", "").strip()
 
     update_payload = {
-        "groq_model": model or "llama-3.3-70b-versatile",
+        "groq_model": model or "openai/gpt-oss-120b",
         "groq_base_url": base_url
     }
     if prompt:
@@ -419,7 +419,7 @@ def test_groq_connection():
     if not api_key:
         return jsonify({"success": False, "error": "No se ha proporcionado una API Key de Groq."}), 400
 
-    model = data.get("model") or config.get("groq_model", "llama-3.3-70b-versatile")
+    model = data.get("model") or config.get("groq_model", "openai/gpt-oss-120b")
 
     try:
         kwargs = {"api_key": api_key}
@@ -467,7 +467,7 @@ def analyze_ticket_with_ai():
     priority = ticket.get("priority", 0)
     raw_desc = ticket.get("description", "Sin descripción.")
 
-    model = config.get("groq_model", "llama-3.3-70b-versatile")
+    model = config.get("groq_model", "openai/gpt-oss-120b")
     system_prompt = config.get("groq_system_prompt")
 
     user_prompt = f"""
