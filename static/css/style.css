@@ -1440,6 +1440,434 @@ body {
 .toast-icon { width: 16px; height: 16px; color: var(--accent-emerald); }
 
 /* =========================================================
+   NAV TAB SWITCHER (MONITOR VS REPORTES)
+   ========================================================= */
+
+.nav-tab-switcher {
+    display: flex;
+    gap: 6px;
+    background: rgba(15, 23, 42, 0.05);
+    padding: 4px;
+    border-radius: 14px;
+    border: 1px solid var(--border-subtle);
+    margin-top: 2px;
+}
+
+[data-theme="dark"] .nav-tab-switcher {
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.nav-tab-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.nav-tab-btn svg {
+    width: 15px;
+    height: 15px;
+}
+
+.nav-tab-btn:active {
+    transform: scale(0.97);
+}
+
+.nav-tab-btn.active {
+    background: var(--bg-surface);
+    color: var(--accent-blue);
+    box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .nav-tab-btn.active {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* =========================================================
+   REPORT SECTION STYLES
+   ========================================================= */
+
+.report-filter-panel {
+    padding: 16px;
+    border-radius: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.report-filter-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.form-group-filter label, .date-select-col label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.form-group-filter label svg, .date-select-col label svg {
+    width: 14px;
+    height: 14px;
+    color: var(--accent-blue);
+}
+
+.form-group-filter-dates {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.report-btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.btn-generate-report {
+    background: linear-gradient(135deg, #ea580c, #f97316);
+    box-shadow: 0 4px 14px rgba(234, 88, 12, 0.3);
+}
+
+.btn-generate-report:hover {
+    background: linear-gradient(135deg, #c2410c, #ea580c);
+}
+
+/* Stats Ribbon */
+.report-stats-ribbon {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: 14px;
+}
+
+.report-stat-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+}
+
+.stat-lbl {
+    color: var(--text-muted);
+}
+
+.stat-val {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+/* Loading state */
+.report-loading-card {
+    text-align: center;
+    padding: 36px 20px;
+    border-radius: 20px;
+}
+
+.loading-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent-amber);
+    margin-bottom: 4px;
+}
+
+.loading-subtitle {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+/* =========================================================
+   EXECUTIVE REPORT DOCUMENT (EXACT IMAGE 2 REPLICA)
+   ========================================================= */
+
+.executive-doc-card {
+    padding: 20px;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.doc-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.doc-tag {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.doc-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-doc-action {
+    padding: 7px 12px;
+    font-size: 12px;
+}
+
+.printable-doc {
+    background: #ffffff;
+    color: #1a1a1a;
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Iconic Orange Header Bar */
+.report-section-banner {
+    background: #f95700;
+    background: linear-gradient(90deg, #ff4500 0%, #ea580c 100%);
+    color: #ffffff;
+    font-family: 'Outfit', sans-serif;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    border-radius: 4px;
+    line-height: 1.2;
+}
+
+.report-doc-intro {
+    font-size: 13.5px;
+    color: #262626;
+    line-height: 1.6;
+    outline: none;
+    padding: 4px 2px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+
+.report-doc-intro:focus {
+    background: #fef3c7;
+}
+
+.report-doc-items {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 4px;
+}
+
+.report-doc-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Orange/Coral Title with ID */
+.report-item-title-link {
+    font-family: 'Outfit', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    color: #ea580c;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 0.15s;
+}
+
+.report-item-title-link:hover {
+    color: #c2410c;
+    text-decoration: underline;
+}
+
+.report-item-desc {
+    font-size: 13px;
+    color: #333333;
+    line-height: 1.55;
+    outline: none;
+    padding: 4px 2px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+
+.report-item-desc:focus {
+    background: #fef3c7;
+}
+
+/* =========================================================
+   TABLE OF TICKETS (EXACT IMAGE 1 REPLICA)
+   ========================================================= */
+
+.table-card {
+    padding: 18px;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.table-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.table-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.table-count-badge {
+    padding: 3px 10px;
+    background: var(--stage-new-bg);
+    color: var(--stage-new-text);
+    border-radius: 12px;
+    font-size: 11.5px;
+    font-weight: 700;
+}
+
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    text-align: left;
+}
+
+.report-table th {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.report-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.report-table tr:hover td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.tbl-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--accent-blue);
+}
+
+.tbl-name {
+    font-weight: 600;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tbl-link {
+    color: var(--odoo-brand);
+    text-decoration: none;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tbl-link:hover {
+    text-decoration: underline;
+}
+
+/* =========================================================
+   PRINT STYLES (CLEAN PDF EXPORT)
+   ========================================================= */
+
+@media print {
+    body, .app-wrapper {
+        background: #ffffff !important;
+        color: #000000 !important;
+    }
+
+    .app-header, .ambient-glow, .report-filter-panel, .report-stats-ribbon, 
+    .doc-toolbar, .table-card, .app-footer, .modal-overlay, .toast,
+    .nav-tab-switcher, .controls-panel, .kpi-scroll-container, .tickets-list {
+        display: none !important;
+    }
+
+    .app-content {
+        padding: 0 !important;
+        max-width: 100% !important;
+    }
+
+    .executive-doc-card {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    .printable-doc {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    .report-section-banner {
+        background: #ff4500 !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .report-item-title-link {
+        color: #ea580c !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+
+/* =========================================================
    DESKTOP / TABLET RESPONSIVE ENHANCEMENT
    ========================================================= */
 
@@ -1468,7 +1896,12 @@ body {
         grid-template-columns: repeat(3, 1fr);
     }
 
+    .report-filter-grid {
+        grid-template-columns: 2fr 1.5fr;
+    }
+
     .app-content {
         padding: 20px 24px;
     }
 }
+

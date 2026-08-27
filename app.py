@@ -518,9 +518,337 @@ Genera un reporte técnico claro y profesional con las siguientes secciones:
         return jsonify({"success": False, "error": f"Error al procesar con Groq IA: {str(e)}"}), 500
 
 
+# ==========================================
+# MONTHLY CLIENT REPORTING ENDPOINTS
+# ==========================================
+
+MONTH_NAMES_ES = [
+    "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+]
+
+
+def strip_html_tags(text):
+    """Clean HTML tags and compress whitespaces."""
+    import re
+    if not text:
+        return ""
+    cleaned = re.sub(r'<[^>]+>', ' ', text)
+    return ' '.join(cleaned.split())
+
+
+@app.route("/api/reports/clients", methods=["GET"])
+def get_report_clients():
+    sess_data = get_active_server_session()
+    if not sess_data:
+        return jsonify({"error": "No autorizado"}), 401
+
+    password = sess_data["password"]
+    uid = sess_data["uid"]
+
+    try:
+        models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object", allow_none=True)
+        teams = models.execute_kw(
+            ODOO_DB,
+            uid,
+            password,
+            "helpdesk.team",
+            "search_read",
+            [[["active", "=", True]]],
+            {"fields": ["id", "name"], "order": "name asc"}
+        )
+        return jsonify({"success": True, "clients": teams})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/reports/tickets", methods=["GET"])
+def get_monthly_tickets():
+    sess_data = get_active_server_session()
+    if not sess_data:
+        return jsonify({"error": "No autorizado"}), 401
+
+    password = sess_data["password"]
+    uid = sess_data["uid"]
+
+    try:
+        client_id = int(request.args.get("client_id", 0))
+        year = int(request.args.get("year", datetime.now().year))
+        month = int(request.args.get("month", datetime.now().month))
+
+        if not client_id or not (1 <= month <= 12):
+            return jsonify({"success": False, "error": "Parámetros de cliente o mes inválidos"}), 400
+
+        # Calculate month date range
+        start_date = f"{year:04d}-{month:02d}-01 00:00:00"
+        if month == 12:
+            next_start = f"{year+1:04d}-01-01 00:00:00"
+        else:
+            next_start = f"{year:04d}-{month+1:02d}-01 00:00:00"
+
+        models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object", allow_none=True)
+
+        domain = [
+            ("team_id", "=", client_id),
+            ("create_date", ">=", start_date),
+            ("create_date", "<", next_start)
+        ]
+
+        fields = [
+            "id",
+            "name",
+            "partner_id",
+            "ticket_type_id",
+            "stage_id",
+            "create_date",
+            "write_date",
+            "close_date",
+            "total_hours_spent",
+            "description",
+            "message_ids"
+        ]
+
+        tickets = models.execute_kw(
+            ODOO_DB,
+            uid,
+            password,
+            "helpdesk.ticket",
+            "search_read",
+            [domain],
+            {"fields": fields, "order": "id asc"}
+        )
+
+        type_counts = {}
+        total_hours = 0.0
+        formatted_tickets = []
+
+        for t in tickets:
+            ticket_id = t["id"]
+            type_data = t.get("ticket_type_id")
+            type_name = type_data[1] if type_data else "Request"
+            type_counts[type_name] = type_counts.get(type_name, 0) + 1
+
+            hours = float(t.get("total_hours_spent") or 0.0)
+            total_hours += hours
+
+            stage_data = t.get("stage_id")
+            stage_name = stage_data[1] if stage_data else "Abierto"
+
+            partner_data = t.get("partner_id")
+            client_contact = partner_data[1] if partner_data else "Sin contacto"
+
+            desc_clean = strip_html_tags(t.get("description", ""))
+
+            # Extract recent chatter logs / notes excluding bot notices
+            msg_ids = t.get("message_ids", [])
+            recent_notes = []
+            if msg_ids:
+                msgs = models.execute_kw(
+                    ODOO_DB,
+                    uid,
+                    password,
+                    "mail.message",
+                    "search_read",
+                    [[["id", "in", msg_ids[:15]]]],
+                    {"fields": ["author_id", "body", "date"], "order": "id asc"}
+                )
+                for m in msgs:
+                    b = strip_html_tags(m.get("body", ""))
+                    author = m.get("author_id", ["", ""])[1] if m.get("author_id") else "Sistema"
+                    if b and "OdooBot" not in author and len(b) > 10:
+                        recent_notes.append(f"{author}: {b}")
+
+            odoo_url = f"{ODOO_URL}/web#id={ticket_id}&cids=1&menu_id=352&action=475&model=helpdesk.ticket&view_type=form"
+
+            formatted_tickets.append({
+                "id": ticket_id,
+                "name": t.get("name") or "(Sin Asunto)",
+                "type": type_name,
+                "stage": stage_name,
+                "contact": client_contact,
+                "create_date": t.get("create_date"),
+                "hours_spent": hours,
+                "description": desc_clean,
+                "notes": recent_notes[-4:], # Top 4 recent meaningful notes
+                "odoo_url": odoo_url
+            })
+
+        month_label = f"{MONTH_NAMES_ES[month]} de {year}"
+
+        return jsonify({
+            "success": True,
+            "period": month_label,
+            "year": year,
+            "month": month,
+            "total_tickets": len(formatted_tickets),
+            "total_hours": round(total_hours, 2),
+            "type_counts": type_counts,
+            "tickets": formatted_tickets
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/reports/generate-ai-report", methods=["POST"])
+def generate_monthly_ai_report():
+    sess_data = get_active_server_session()
+    if not sess_data:
+        return jsonify({"error": "No autorizado"}), 401
+
+    config = load_integrations_config()
+    api_key = config.get("groq_api_key")
+    base_url = config.get("groq_base_url")
+    if not api_key:
+        return jsonify({
+            "success": False,
+            "error": "Groq IA no está configurado. Ve a Ajustes > Integraciones para ingresar tu API Key."
+        }), 400
+
+    data = request.get_json() or {}
+    client_name = data.get("client_name", "Cliente")
+    period_label = data.get("period_label", "este mes")
+    tickets = data.get("tickets") or []
+
+    if not tickets:
+        return jsonify({"success": False, "error": "No hay tickets para generar el resumen."}), 400
+
+    # Build tickets payload for Groq
+    type_counts = {}
+    tickets_prompt_list = []
+    for idx, t in enumerate(tickets, 1):
+        ttype = t.get("type", "Request")
+        type_counts[ttype] = type_counts.get(ttype, 0) + 1
+        
+        notes_str = "\n   - ".join(t.get("notes") or []) if t.get("notes") else "Sin notas adicionales."
+        desc_str = t.get("description") or "Sin descripción provista."
+        
+        tickets_prompt_list.append(
+            f"{idx}. #{t['id']} - {t['name']} (Tipo: {ttype})\n"
+            f"   Descripción: {desc_str[:300]}\n"
+            f"   Notas/Logs de Resolución:\n   - {notes_str}"
+        )
+
+    # Breakdown text helper
+    type_breakdown_parts = [f"{cnt} como {k.lower()}" for k, cnt in type_counts.items()]
+    type_breakdown_str = ", ".join(type_breakdown_parts)
+
+    prompt = f"""
+Eres un redactor técnico senior de informes ejecutivos de soporte TI para clientes corporativos.
+Genera el 'RESUMEN DE SOPORTE' mensual para el cliente '{client_name}' del período '{period_label}'.
+
+Datos estadísticos:
+- Total casos aperturados en el mes: {len(tickets)}
+- Desglose por tipo: {type_breakdown_str}
+
+Casos registrados en Odoo con sus logs y notas de resolución:
+{chr(10).join(tickets_prompt_list)}
+
+Instrucciones estrictas:
+1. 'section_header': Debe ser '1. RESUMEN DE SOPORTE'
+2. 'intro': Un párrafo claro con el conteo: 'Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:'
+3. 'tickets': Una lista ordenada donde para CADA ticket devuelves:
+   - 'id': número de ID
+   - 'title': título exacto del caso
+   - 'summary': 1 o 2 párrafos ejecutivos, claros, en español neutro profesional, explicando exactamente la acción realizada o cómo quedó solucionado el caso según las notas y logs del ticket.
+
+Responde ÚNICAMENTE en formato JSON válido con esta estructura:
+{{
+  "section_header": "1. RESUMEN DE SOPORTE",
+  "intro": "Durante el mes de...",
+  "tickets": [
+    {{
+      "id": 11239,
+      "title": "Creación de Accesos SocialHub",
+      "summary": "Habilitación de los usuarios solicitados..."
+    }}
+  ]
+}}
+"""
+
+    model = config.get("groq_model", "openai/gpt-oss-120b")
+    try:
+        kwargs = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = groq.Groq(**kwargs)
+
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Eres un asistente experto que responde estrictamente en JSON válido."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
+
+        raw_json = completion.choices[0].message.content.strip()
+        parsed = json.loads(raw_json)
+
+        return jsonify({
+            "success": True,
+            "report": parsed,
+            "model_used": model
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Error al generar informe con IA: {str(e)}"}), 500
+
+
+@app.route("/api/reports/regenerate-single-summary", methods=["POST"])
+def regenerate_single_summary():
+    sess_data = get_active_server_session()
+    if not sess_data:
+        return jsonify({"error": "No autorizado"}), 401
+
+    config = load_integrations_config()
+    api_key = config.get("groq_api_key")
+    base_url = config.get("groq_base_url")
+    if not api_key:
+        return jsonify({"success": False, "error": "Groq IA no está configurado."}), 400
+
+    data = request.get_json() or {}
+    ticket = data.get("ticket") or {}
+
+    notes_str = "\n- ".join(ticket.get("notes") or [])
+    desc_str = ticket.get("description") or ""
+
+    prompt = f"""
+Sintetiza en un párrafo profesional (1 a 3 líneas) la resolución y actividades realizadas para el siguiente caso de soporte:
+Caso: #{ticket.get('id')} - {ticket.get('name')} (Tipo: {ticket.get('type')})
+Descripción: {desc_str[:400]}
+Notas/Logs de resolución:
+- {notes_str}
+
+Responde ÚNICAMENTE con el párrafo del resumen en español neutro sin introducciones ni asteriscos.
+"""
+
+    model = config.get("groq_model", "openai/gpt-oss-120b")
+    try:
+        kwargs = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        client = groq.Groq(**kwargs)
+
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Eres un redactor técnico que resume casos en 1 párrafo claro."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=300
+        )
+        summary = completion.choices[0].message.content.strip()
+        return jsonify({"success": True, "summary": summary})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5050))
-    # Production-ready debug configuration
     debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() in ("true", "1")
     print(f"✨ Odoo Ticket Hub iniciado en http://localhost:{port} (Debug: {debug_mode})")
     app.run(host="0.0.0.0", port=port, debug=debug_mode)
+

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Odoo Ticket Hub • Mobile First</title>
+    <title>Odoo Ticket Hub • Mobile First & Informes</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,7 +37,7 @@
                             <i data-lucide="zap" class="brand-icon"></i>
                         </div>
                         <h1 class="brand-title">Odoo Ticket Hub</h1>
-                        <p class="brand-subtitle">Visualizador móvil & asistencia inteligente con Groq IA</p>
+                        <p class="brand-subtitle">Monitor móvil & generación de informes mensuales con IA</p>
                     </div>
 
                     <div class="server-badge">
@@ -137,6 +137,18 @@
                     </div>
                 </div>
 
+                <!-- Navigation Tabs: Monitor vs Informes Mensuales -->
+                <nav class="nav-tab-switcher">
+                    <button class="nav-tab-btn active" id="tab-nav-monitor" data-view="monitor">
+                        <i data-lucide="layout-dashboard"></i>
+                        <span>Monitor en Vivo</span>
+                    </button>
+                    <button class="nav-tab-btn" id="tab-nav-reports" data-view="reports">
+                        <i data-lucide="file-bar-chart-2"></i>
+                        <span>Informes por Cliente</span>
+                    </button>
+                </nav>
+
                 <!-- User Bar Chip -->
                 <div class="user-strip">
                     <div class="user-pill-mobile">
@@ -152,8 +164,8 @@
                 </div>
             </header>
 
-            <!-- Main Content (Mobile Optimized) -->
-            <main class="app-content">
+            <!-- ================= VIEW 1: MONITOR EN VIVO ================= -->
+            <main id="view-monitor" class="app-content app-view-container">
                 
                 <!-- KPI Horizontal Scroll Ribbon -->
                 <div class="kpi-scroll-container">
@@ -269,6 +281,176 @@
 
             </main>
 
+            <!-- ================= VIEW 2: INFORMES MENSUALES POR CLIENTE ================= -->
+            <main id="view-reports" class="app-content app-view-container hidden">
+                
+                <!-- Report Filter Panel -->
+                <div class="report-filter-panel glass-panel">
+                    <div class="report-filter-grid">
+                        <div class="form-group-filter">
+                            <label for="report-client-select">
+                                <i data-lucide="building"></i> Cliente / Cuenta:
+                            </label>
+                            <select id="report-client-select" class="custom-select full-width">
+                                <option value="">Cargando clientes de Odoo...</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group-filter-dates">
+                            <div class="date-select-col">
+                                <label for="report-month-select">
+                                    <i data-lucide="calendar"></i> Mes:
+                                </label>
+                                <select id="report-month-select" class="custom-select full-width">
+                                    <option value="1">Enero</option>
+                                    <option value="2">Febrero</option>
+                                    <option value="3">Marzo</option>
+                                    <option value="4">Abril</option>
+                                    <option value="5">Mayo</option>
+                                    <option value="6">Junio</option>
+                                    <option value="7" selected>Julio</option>
+                                    <option value="8">Agosto</option>
+                                    <option value="9">Septiembre</option>
+                                    <option value="10">Octubre</option>
+                                    <option value="11">Noviembre</option>
+                                    <option value="12">Diciembre</option>
+                                </select>
+                            </div>
+
+                            <div class="date-select-col">
+                                <label for="report-year-select">
+                                    <i data-lucide="calendar-range"></i> Año:
+                                </label>
+                                <select id="report-year-select" class="custom-select full-width">
+                                    <option value="2026" selected>2026</option>
+                                    <option value="2025">2025</option>
+                                    <option value="2024">2024</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="report-btn-row">
+                        <button id="btn-generate-ai-report" class="btn-primary btn-generate-report">
+                            <i data-lucide="sparkles"></i>
+                            <span>Generar Informe con Groq IA</span>
+                        </button>
+                        <button id="btn-load-report-tickets" class="btn-secondary">
+                            <i data-lucide="list"></i>
+                            <span>Solo Listar Tickets</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Report Summary Stats Ribbon -->
+                <div id="report-stats-ribbon" class="report-stats-ribbon glass-panel hidden">
+                    <div class="report-stat-pill">
+                        <span class="stat-lbl">Cliente:</span>
+                        <strong id="stat-client-name" class="stat-val">-</strong>
+                    </div>
+                    <div class="report-stat-pill">
+                        <span class="stat-lbl">Período:</span>
+                        <strong id="stat-period-name" class="stat-val">-</strong>
+                    </div>
+                    <div class="report-stat-pill">
+                        <span class="stat-lbl">Casos:</span>
+                        <strong id="stat-tickets-count" class="stat-val">0</strong>
+                    </div>
+                    <div class="report-stat-pill">
+                        <span class="stat-lbl">Horas Registradas:</span>
+                        <strong id="stat-total-hours" class="stat-val">0.0h</strong>
+                    </div>
+                </div>
+
+                <!-- AI Loading Progress Card -->
+                <div id="report-ai-loading" class="report-loading-card glass-panel hidden">
+                    <div class="ai-pulse-orb">⚡</div>
+                    <h3 class="loading-title">Extrayendo logs de Odoo y redactando reporte con Groq IA...</h3>
+                    <p class="loading-subtitle">Analizando notas internas, resoluciones y categorización del cliente</p>
+                    <div class="skeleton-ai-lines">
+                        <div class="sk-line"></div>
+                        <div class="sk-line half"></div>
+                        <div class="sk-line"></div>
+                    </div>
+                </div>
+
+                <!-- ================= EXECUTIVE REPORT DOCUMENT (EXACT LAYOUT OF IMAGE 2) ================= -->
+                <div id="executive-report-card" class="executive-doc-card glass-panel hidden">
+                    
+                    <div class="doc-toolbar">
+                        <span class="doc-tag">📄 Formato Informe Mensual</span>
+                        <div class="doc-actions">
+                            <button id="btn-copy-report-text" class="btn-secondary btn-doc-action" title="Copiar informe para Word/Docs/Correo">
+                                <i data-lucide="copy"></i>
+                                <span>Copiar Informe</span>
+                            </button>
+                            <button id="btn-print-report" class="btn-secondary btn-doc-action" title="Imprimir o guardar PDF">
+                                <i data-lucide="printer"></i>
+                                <span>Imprimir / PDF</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Printable Document Container -->
+                    <div class="printable-doc" id="printable-report-area">
+                        <!-- Orange Section Header Bar (1. RESUMEN DE SOPORTE) -->
+                        <div class="report-section-banner" id="doc-section-header">
+                            1. RESUMEN DE SOPORTE
+                        </div>
+
+                        <!-- Intro Paragraph with counts and breakdown -->
+                        <div class="report-doc-intro" id="doc-intro-text" contenteditable="true" title="Clic para editar texto">
+                            Durante el mes se aperturaron los siguientes casos...
+                        </div>
+
+                        <!-- Ticket Items List (Title Orange + ID & Summary) -->
+                        <div class="report-doc-items" id="doc-items-container">
+                            <!-- Items injected dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ================= TICKETS DATA TABLE (LAYOUT OF IMAGE 1) ================= -->
+                <div id="report-table-card" class="table-card glass-panel hidden">
+                    <div class="table-header-row">
+                        <h3 class="table-title">
+                            <i data-lucide="table"></i> Detalle de Tickets del Período
+                        </h3>
+                        <span class="table-count-badge" id="table-count-badge">0 tickets</span>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="report-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Nombre del Caso</th>
+                                    <th>Tipo</th>
+                                    <th>Horas</th>
+                                    <th>Creación</th>
+                                    <th>Etapa</th>
+                                    <th>Odoo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="report-table-tbody">
+                                <!-- Injected rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Reports Empty State -->
+                <div id="reports-empty-state" class="empty-card glass-panel">
+                    <div class="empty-icon-wrap">
+                        <i data-lucide="file-text"></i>
+                    </div>
+                    <h3>Generador de Informes Mensuales</h3>
+                    <p>Selecciona un cliente y el mes correspondiente para obtener la síntesis ejecutiva de soporte y el resumen de cada ticket según sus notas y logs.</p>
+                </div>
+
+            </main>
+
             <!-- Bottom Status Bar -->
             <footer class="app-footer">
                 <span id="last-updated-text">Actualizado recién</span>
@@ -303,7 +485,7 @@
                                 <div class="groq-logo-badge">⚡</div>
                                 <div>
                                     <h4>Groq (IA ultra-rápida)</h4>
-                                    <p>Análisis de tickets y generación de respuestas con Llama 3 / Mixtral</p>
+                                    <p>Análisis de tickets y generación de informes ejecutivos</p>
                                 </div>
                             </div>
                             <span id="groq-status-badge" class="badge-status-inactive">No configurado</span>
@@ -326,6 +508,18 @@
                                     </button>
                                 </div>
                                 <small class="form-hint">Obtén tu API key gratuita en <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com</a></small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="groq-base-url">
+                                    <i data-lucide="globe" class="input-icon"></i> Base URL / Proxy (Opcional)
+                                </label>
+                                <input 
+                                    type="text" 
+                                    id="groq-base-url" 
+                                    placeholder="https://api.groq.com/openai/v1 (o proxy)" 
+                                    autocomplete="off"
+                                />
                             </div>
 
                             <div class="form-group">
@@ -368,7 +562,7 @@
             </div>
         </div>
 
-        <!-- ================= TICKET DETAIL MODAL (BOTTOM SHEET / MODAL) ================= -->
+        <!-- ================= TICKET DETAIL MODAL ================= -->
         <div id="ticket-modal" class="modal-overlay hidden">
             <div class="modal-sheet glass-panel">
                 <div class="modal-header">
@@ -483,7 +677,7 @@
                     <!-- AI Loading State -->
                     <div id="ai-loading" class="ai-loading-box">
                         <div class="ai-pulse-orb">⚡</div>
-                        <p class="ai-loading-text">Procesando con Groq Llama 3...</p>
+                        <p class="ai-loading-text">Procesando con Groq IA...</p>
                         <div class="skeleton-ai-lines">
                             <div class="sk-line"></div>
                             <div class="sk-line half"></div>
@@ -502,7 +696,7 @@
                 <div class="modal-footer ai-modal-footer">
                     <button id="ai-btn-copy" class="btn-primary full-width">
                         <i data-lucide="copy"></i>
-                        <span>Copiar Análisis Completo</span>
+                        <span>Copiar Análisis</span>
                     </button>
                 </div>
             </div>

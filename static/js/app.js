@@ -1,6 +1,6 @@
 /**
- * Odoo Ticket Hub - Mobile First Application Logic
- * Supports Light/Dark Theme, Groq AI Analysis & Direct Odoo Links
+ * Odoo Ticket Hub - Mobile First & Client Monthly Reports
+ * Supports Light/Dark Theme, Groq AI Analysis, Monthly Reports & Odoo Integration
  */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -8,6 +8,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const state = {
         authenticated: false,
         user: null,
+        currentView: "monitor", // "monitor" or "reports"
+        
+        // Monitor State
         tickets: [],
         filteredTickets: [],
         currentStageFilter: "all",
@@ -15,6 +18,17 @@ document.addEventListener("DOMContentLoaded", () => {
         limit: 10,
         selectedTicket: null,
         isRefreshing: false,
+        
+        // Reports State
+        reportClients: [],
+        selectedClientId: null,
+        selectedMonth: 7,
+        selectedYear: 2026,
+        reportTickets: [],
+        aiReport: null,
+        isGeneratingReport: false,
+        
+        // Settings & Theme
         groqConfigured: false,
         theme: localStorage.getItem("odoo_hub_theme") || "light"
     };
@@ -37,7 +51,13 @@ document.addEventListener("DOMContentLoaded", () => {
         btnText: document.querySelector("#btn-login .btn-text"),
         btnArrow: document.querySelector("#btn-login .btn-arrow"),
         
-        // Dashboard
+        // Navigation Switcher
+        tabNavMonitor: document.getElementById("tab-nav-monitor"),
+        tabNavReports: document.getElementById("tab-nav-reports"),
+        viewMonitor: document.getElementById("view-monitor"),
+        viewReports: document.getElementById("view-reports"),
+
+        // Dashboard Header
         userDisplayName: document.getElementById("user-display-name"),
         userAvatar: document.getElementById("user-avatar"),
         userEmailLabel: document.getElementById("user-email-label"),
@@ -89,6 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
         settingsBtnDone: document.getElementById("settings-btn-done"),
         groqStatusBadge: document.getElementById("groq-status-badge"),
         groqApiKeyInput: document.getElementById("groq-api-key"),
+        groqBaseUrlInput: document.getElementById("groq-base-url"),
         groqModelSelect: document.getElementById("groq-model-select"),
         groqPromptInput: document.getElementById("groq-prompt"),
         toggleGroqKeyBtn: document.getElementById("toggle-groq-key"),
@@ -105,6 +126,29 @@ document.addEventListener("DOMContentLoaded", () => {
         aiTextBox: document.getElementById("ai-text-box"),
         aiBtnCopy: document.getElementById("ai-btn-copy"),
         
+        // Report Elements
+        reportClientSelect: document.getElementById("report-client-select"),
+        reportMonthSelect: document.getElementById("report-month-select"),
+        reportYearSelect: document.getElementById("report-year-select"),
+        btnGenerateAiReport: document.getElementById("btn-generate-ai-report"),
+        btnLoadReportTickets: document.getElementById("btn-load-report-tickets"),
+        reportStatsRibbon: document.getElementById("report-stats-ribbon"),
+        statClientName: document.getElementById("stat-client-name"),
+        statPeriodName: document.getElementById("stat-period-name"),
+        statTicketsCount: document.getElementById("stat-tickets-count"),
+        statTotalHours: document.getElementById("stat-total-hours"),
+        reportAiLoading: document.getElementById("report-ai-loading"),
+        executiveReportCard: document.getElementById("executive-report-card"),
+        docSectionHeader: document.getElementById("doc-section-header"),
+        docIntroText: document.getElementById("doc-intro-text"),
+        docItemsContainer: document.getElementById("doc-items-container"),
+        btnCopyReportText: document.getElementById("btn-copy-report-text"),
+        btnPrintReport: document.getElementById("btn-print-report"),
+        reportTableCard: document.getElementById("report-table-card"),
+        tableCountBadge: document.getElementById("table-count-badge"),
+        reportTableTbody: document.getElementById("report-table-tbody"),
+        reportsEmptyState: document.getElementById("reports-empty-state"),
+
         // Toast
         toast: document.getElementById("toast-notification"),
         toastMsg: document.getElementById("toast-message")
@@ -139,6 +183,35 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     updateIcons();
+
+    // ==========================================
+    // NAVIGATION SWITCHER (MONITOR VS INFORMES)
+    // ==========================================
+
+    function switchView(viewName) {
+        state.currentView = viewName;
+        if (viewName === "monitor") {
+            elements.tabNavMonitor.classList.add("active");
+            elements.tabNavReports.classList.remove("active");
+            elements.viewMonitor.classList.remove("hidden");
+            elements.viewReports.classList.add("hidden");
+        } else if (viewName === "reports") {
+            elements.tabNavReports.classList.add("active");
+            elements.tabNavMonitor.classList.remove("active");
+            elements.viewReports.classList.remove("hidden");
+            elements.viewMonitor.classList.add("hidden");
+            
+            if (state.reportClients.length === 0) {
+                fetchReportClients();
+            }
+        }
+        updateIcons();
+    }
+
+    if (elements.tabNavMonitor && elements.tabNavReports) {
+        elements.tabNavMonitor.addEventListener("click", () => switchView("monitor"));
+        elements.tabNavReports.addEventListener("click", () => switchView("reports"));
+    }
 
     // ==========================================
     // AUTHENTICATION LOGIC
@@ -258,7 +331,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ==========================================
-    // TICKETS FETCH & RENDER
+    // TICKETS FETCH & RENDER (MONITOR)
     // ==========================================
 
     function renderSkeletons() {
@@ -327,8 +400,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function getStageBadgeHtml(stage) {
-        const cat = stage.category || "other";
-        return `<span class="stage-badge stage-${cat}">${stage.name}</span>`;
+        const cat = typeof stage === "object" ? (stage.category || "other") : "other";
+        const name = typeof stage === "object" ? stage.name : stage;
+        return `<span class="stage-badge stage-${cat}">${name}</span>`;
     }
 
     function renderTicketCards(tickets) {
@@ -408,7 +482,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function attachCardListeners() {
-        // Detail View Buttons
         document.querySelectorAll(".btn-card-detail").forEach((btn) => {
             btn.addEventListener("click", () => {
                 const id = parseInt(btn.getAttribute("data-id"));
@@ -417,7 +490,6 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         });
 
-        // AI Analyze Buttons on Cards
         document.querySelectorAll(".btn-card-ai").forEach((btn) => {
             btn.addEventListener("click", () => {
                 const id = parseInt(btn.getAttribute("data-id"));
@@ -426,7 +498,6 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         });
 
-        // WhatsApp Copy Buttons
         document.querySelectorAll(".btn-copy-wa").forEach((btn) => {
             btn.addEventListener("click", (e) => {
                 e.stopPropagation();
@@ -438,13 +509,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ==========================================
-    // FILTERING & SEARCH
+    // FILTERING & SEARCH (MONITOR)
     // ==========================================
 
     function applyFilters() {
         let list = [...state.tickets];
 
-        // Filter by Stage (Includes 'new')
         if (state.currentStageFilter !== "all") {
             list = list.filter((t) => {
                 if (state.currentStageFilter === "new") {
@@ -469,7 +539,6 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         }
 
-        // Filter by Search Query
         if (state.searchQuery) {
             const q = state.searchQuery.toLowerCase();
             list = list.filter((t) => {
@@ -503,7 +572,6 @@ document.addEventListener("DOMContentLoaded", () => {
         applyFilters();
     });
 
-    // Stage Filter Chips
     elements.filterChips.forEach((chip) => {
         chip.addEventListener("click", () => {
             elements.filterChips.forEach((c) => c.classList.remove("active"));
@@ -513,7 +581,6 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // KPI Cards Click Filter
     elements.kpiCards.forEach((kpi) => {
         kpi.addEventListener("click", () => {
             const filter = kpi.getAttribute("data-filter");
@@ -540,7 +607,209 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ==========================================
-    // DETAIL MODAL
+    // MONTHLY REPORTS LOGIC
+    // ==========================================
+
+    async function fetchReportClients() {
+        try {
+            const res = await fetch("/api/reports/clients");
+            const data = await res.json();
+            if (data.success && data.clients) {
+                state.reportClients = data.clients;
+                let optionsHtml = "";
+                data.clients.forEach(c => {
+                    optionsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
+                });
+                elements.reportClientSelect.innerHTML = optionsHtml;
+
+                // Pre-select Ajover or first client
+                const ajover = data.clients.find(c => c.name.toLowerCase().includes("ajover"));
+                if (ajover) {
+                    elements.reportClientSelect.value = ajover.id;
+                }
+            }
+        } catch (e) {
+            console.error("Error loading report clients:", e);
+        }
+    }
+
+    async function loadMonthlyReport(withAi = false) {
+        const clientId = elements.reportClientSelect.value;
+        const clientName = elements.reportClientSelect.options[elements.reportClientSelect.selectedIndex]?.text || "Cliente";
+        const month = parseInt(elements.reportMonthSelect.value);
+        const year = parseInt(elements.reportYearSelect.value);
+
+        if (!clientId) {
+            showToast("Por favor selecciona un cliente de Odoo");
+            return;
+        }
+
+        elements.reportsEmptyState.classList.add("hidden");
+        elements.executiveReportCard.classList.add("hidden");
+        elements.reportTableCard.classList.add("hidden");
+        elements.reportStatsRibbon.classList.remove("hidden");
+
+        if (withAi) {
+            elements.reportAiLoading.classList.remove("hidden");
+            elements.btnGenerateAiReport.disabled = true;
+        } else {
+            elements.btnLoadReportTickets.disabled = true;
+        }
+
+        try {
+            // 1. Fetch tickets for that client & month
+            const res = await fetch(`/api/reports/tickets?client_id=${clientId}&year=${year}&month=${month}`);
+            const data = await res.json();
+
+            if (!data.success) {
+                showToast(`❌ ${data.error || "Error al cargar tickets"}`);
+                return;
+            }
+
+            state.reportTickets = data.tickets;
+            elements.statClientName.textContent = clientName;
+            elements.statPeriodName.textContent = data.period;
+            elements.statTicketsCount.textContent = `${data.total_tickets} casos`;
+            elements.statTotalHours.textContent = `${data.total_hours}h`;
+
+            if (data.total_tickets === 0) {
+                elements.reportTableCard.classList.remove("hidden");
+                elements.reportTableTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">No se encontraron tickets registrados para ${clientName} en ${data.period}.</td></tr>`;
+                elements.tableCountBadge.textContent = "0 tickets";
+                elements.reportAiLoading.classList.add("hidden");
+                return;
+            }
+
+            // Render Table (Image 1 replica)
+            renderReportTable(data.tickets);
+            elements.reportTableCard.classList.remove("hidden");
+
+            // 2. Generate AI Report (Image 2 replica) if requested
+            if (withAi) {
+                const aiRes = await fetch("/api/reports/generate-ai-report", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        client_name: clientName,
+                        period_label: data.period,
+                        tickets: data.tickets
+                    })
+                });
+                const aiData = await aiRes.json();
+
+                if (aiData.success && aiData.report) {
+                    state.aiReport = aiData.report;
+                    renderExecutiveReportDoc(aiData.report, data.tickets);
+                    elements.executiveReportCard.classList.remove("hidden");
+                    showToast("✨ Informe generado con éxito con Groq IA");
+                } else {
+                    showToast(`⚠️ ${aiData.error || "No se pudo generar el texto del informe con IA"}`);
+                }
+            }
+
+        } catch (err) {
+            console.error("Error generating report:", err);
+            showToast("❌ Error de conexión al generar informe");
+        } finally {
+            elements.reportAiLoading.classList.add("hidden");
+            elements.btnGenerateAiReport.disabled = false;
+            elements.btnLoadReportTickets.disabled = false;
+            updateIcons();
+        }
+    }
+
+    function renderReportTable(tickets) {
+        elements.tableCountBadge.textContent = `${tickets.length} tickets`;
+        const rowsHtml = tickets.map(t => {
+            const dateStr = t.create_date ? t.create_date.replace("T", " ") : "-";
+            return `
+            <tr>
+                <td class="tbl-id">#${t.id}</td>
+                <td class="tbl-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</td>
+                <td><span class="badge-pill">${escapeHtml(t.type)}</span></td>
+                <td><strong>${t.hours_spent ? t.hours_spent.toFixed(2) + "h" : "00:00"}</strong></td>
+                <td>${dateStr}</td>
+                <td>${getStageBadgeHtml(t.stage)}</td>
+                <td>
+                    <a href="${t.odoo_url}" target="_blank" rel="noopener" class="tbl-link" title="Abrir en Odoo">
+                        <i data-lucide="external-link"></i>
+                    </a>
+                </td>
+            </tr>
+            `;
+        }).join("");
+        elements.reportTableTbody.innerHTML = rowsHtml;
+        updateIcons();
+    }
+
+    function renderExecutiveReportDoc(report, rawTickets) {
+        // Section Header
+        elements.docSectionHeader.textContent = report.section_header || "1. RESUMEN DE SOPORTE";
+        
+        // Intro paragraph
+        elements.docIntroText.textContent = report.intro || "";
+
+        // Ticket Items (Exact layout of Image 2)
+        const itemsHtml = (report.tickets || []).map(t => {
+            const matchedRaw = rawTickets.find(r => r.id === t.id);
+            const odooUrl = matchedRaw ? matchedRaw.odoo_url : "#";
+            
+            return `
+            <div class="report-doc-item" data-ticket-id="${t.id}">
+                <a href="${odooUrl}" target="_blank" rel="noopener" class="report-item-title-link" title="Abrir #${t.id} en Odoo">
+                    <span>${escapeHtml(t.title)} (#${t.id})</span>
+                    <i data-lucide="external-link" style="width: 13px; height: 13px;"></i>
+                </a>
+                <p class="report-item-desc" contenteditable="true" title="Clic para editar">${escapeHtml(t.summary)}</p>
+            </div>
+            `;
+        }).join("");
+
+        elements.docItemsContainer.innerHTML = itemsHtml;
+        updateIcons();
+    }
+
+    // Copy Full Report Text formatted for Word/Docs/Email
+    if (elements.btnCopyReportText) {
+        elements.btnCopyReportText.addEventListener("click", () => {
+            const header = elements.docSectionHeader.innerText.trim();
+            const intro = elements.docIntroText.innerText.trim();
+            
+            let fullText = `${header}\n\n${intro}\n\n`;
+
+            document.querySelectorAll(".report-doc-item").forEach(item => {
+                const title = item.querySelector(".report-item-title-link")?.innerText.trim();
+                const desc = item.querySelector(".report-item-desc")?.innerText.trim();
+                if (title && desc) {
+                    fullText += `${title}\n${desc}\n\n`;
+                }
+            });
+
+            navigator.clipboard.writeText(fullText.trim()).then(() => {
+                showToast("📋 Informe completo copiado al portapapeles");
+            }).catch(() => {
+                showToast("Error al copiar al portapapeles");
+            });
+        });
+    }
+
+    // Print Document / PDF Export
+    if (elements.btnPrintReport) {
+        elements.btnPrintReport.addEventListener("click", () => {
+            window.print();
+        });
+    }
+
+    if (elements.btnGenerateAiReport) {
+        elements.btnGenerateAiReport.addEventListener("click", () => loadMonthlyReport(true));
+    }
+
+    if (elements.btnLoadReportTickets) {
+        elements.btnLoadReportTickets.addEventListener("click", () => loadMonthlyReport(false));
+    }
+
+    // ==========================================
+    // DETAIL MODAL (MONITOR)
     // ==========================================
 
     function openDetailModal(ticket) {
@@ -566,9 +835,7 @@ document.addEventListener("DOMContentLoaded", () => {
             elements.modalDescriptionContent.textContent = "Sin descripción provista en Odoo.";
         }
 
-        // Direct Odoo link
         elements.modalLinkOdoo.href = ticket.odoo_url;
-
         elements.ticketModal.classList.remove("hidden");
         updateIcons();
     }
@@ -615,10 +882,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     elements.groqStatusBadge.className = "badge-status-inactive";
                 }
 
-                if (data.groq_model) {
+                if (data.groq_base_url && elements.groqBaseUrlInput) {
+                    elements.groqBaseUrlInput.value = data.groq_base_url;
+                }
+
+                if (data.groq_model && elements.groqModelSelect) {
                     elements.groqModelSelect.value = data.groq_model;
                 }
-                if (data.groq_system_prompt) {
+                if (data.groq_system_prompt && elements.groqPromptInput) {
                     elements.groqPromptInput.value = data.groq_system_prompt;
                 }
             }
@@ -653,6 +924,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Test Groq Connection
     elements.btnTestGroq.addEventListener("click", async () => {
         const apiKey = elements.groqApiKeyInput.value.trim();
+        const baseUrl = elements.groqBaseUrlInput ? elements.groqBaseUrlInput.value.trim() : "";
         const model = elements.groqModelSelect.value;
 
         elements.btnTestGroq.disabled = true;
@@ -662,7 +934,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/settings/groq/test", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ api_key: apiKey, model: model })
+                body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model: model })
             });
             const data = await res.json();
 
@@ -684,6 +956,7 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.groqSettingsForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const apiKey = elements.groqApiKeyInput.value.trim();
+        const baseUrl = elements.groqBaseUrlInput ? elements.groqBaseUrlInput.value.trim() : "";
         const model = elements.groqModelSelect.value;
         const prompt = elements.groqPromptInput.value.trim();
 
@@ -693,7 +966,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/settings/groq", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ api_key: apiKey, model: model, system_prompt: prompt })
+                body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model: model, system_prompt: prompt })
             });
             const data = await res.json();
 
@@ -711,7 +984,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ==========================================
-    // GROQ AI TICKET ANALYSIS
+    // GROQ AI INDIVIDUAL TICKET ANALYSIS
     // ==========================================
 
     let lastAiResponseText = "";
@@ -773,34 +1046,18 @@ document.addEventListener("DOMContentLoaded", () => {
     function formatAiResponse(raw) {
         if (!raw) return "";
 
-        // Strip reasoning tags if present
         let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-
-        // Convert headers (###, ##, #) to clean section titles
         text = text.replace(/^(?:###|##|#)\s*(?:[0-9️⃣]*\s*)?(.*?)$/gm, '<div class="ai-section-title">$1</div>');
-
-        // Convert blockquotes (> ...) to response quote boxes
         text = text.replace(/(?:^>[ \t]*(.*?)(?:\n|$))+/gm, (match) => {
             const inner = match.replace(/^>[ \t]*/gm, "").trim().replace(/\n/g, "<br>");
             return `<div class="ai-quote-box">${inner}</div>`;
         });
-
-        // Convert bullet points (- or *) to clean list items
         text = text.replace(/^[ \t]*[-*•]\s+(.*?)$/gm, '<div class="ai-list-item"><span class="ai-bullet">▪</span><span>$1</span></div>');
-
-        // Convert numbered list items (1., 2., etc)
         text = text.replace(/^[ \t]*(\d+)\.\s+(.*?)$/gm, '<div class="ai-list-item"><span class="ai-num">$1.</span><span>$2</span></div>');
-
-        // Bold **text** -> <strong>text</strong> (removes double asterisks)
         text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-        // Italic *text* -> <em>text</em>
         text = text.replace(/(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
-
-        // Clean up markdown divider lines ---
         text = text.replace(/^---+$/gm, '<hr class="ai-divider">');
 
-        // Wrap loose paragraphs cleanly
         const blocks = text.split(/\n{2,}/).map(block => {
             block = block.trim();
             if (!block) return "";
@@ -825,7 +1082,6 @@ document.addEventListener("DOMContentLoaded", () => {
             .trim();
     }
 
-    // WhatsApp Format Copy
     function copyWhatsAppFormat(ticket) {
         let stars = "🤍 Normal";
         if (ticket.priority === 3) stars = "⭐⭐⭐ Urgente";
