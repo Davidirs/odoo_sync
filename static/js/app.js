@@ -702,21 +702,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (aiData.success && aiData.report) {
                     state.aiReport = aiData.report;
-                    renderExecutiveReportDoc(
-                        aiData.report, 
-                        data.tickets, 
-                        data.type_counts || {}, 
-                        data.total_tickets, 
-                        data.month_name, 
-                        data.year
-                    );
+                    renderExecutiveReportDoc(aiData.report, data.tickets, data);
                     elements.executiveReportCard.classList.remove("hidden");
-                    showToast("✨ Informe generado con éxito con Groq IA");
+                    showToast("✨ Informe generado con éxito con IA");
                 } else {
                     showToast(`⚠️ ${aiData.error || "No se pudo generar el texto del informe con IA"}`);
                 }
             } else {
-                // When only listing tickets, show executive doc with volume section ready
+                // When only listing tickets, render all 4 statistical sections (Volumen, Tiempo, Horas, Estados)
+                renderVolumeSection(data.type_counts || {}, data.total_tickets, data.month_name, data.year);
+                renderAvgDaysSection(data.tickets, data.avg_days, data.month_name);
+                renderHoursSection(data.tickets, data.total_hours, data.month_name, data.year);
+                renderStagesSection(data.stage_counts, data.total_tickets, data.month_name, data.year);
                 elements.executiveReportCard.classList.remove("hidden");
             }
 
@@ -756,18 +753,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     let volumeChartInstance = null;
+    let stagesChartInstance = null;
 
     function renderVolumeSection(typeCounts, totalTickets, monthName, year) {
-        // 1. Update Month in Intro
         const monthLbl = document.getElementById("doc-volume-month-label");
         if (monthLbl) monthLbl.textContent = monthName;
 
-        // 2. Render Distribution Table
         const tbody = document.getElementById("volume-table-tbody");
         const totalEl = document.getElementById("volume-total-val");
         
         let rowsHtml = "";
-        const sortedKeys = Object.keys(typeCounts).sort();
+        const sortedKeys = Object.keys(typeCounts || {}).sort();
         sortedKeys.forEach(type => {
             rowsHtml += `
             <tr>
@@ -779,7 +775,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (tbody) tbody.innerHTML = rowsHtml;
         if (totalEl) totalEl.textContent = totalTickets;
 
-        // 3. Render Bar Chart (Image Replica)
         const chartTitle = document.getElementById("volume-chart-title");
         if (chartTitle) chartTitle.textContent = `Tipo de caso - ${monthName} ${year}`;
 
@@ -790,7 +785,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const ctx = canvas.getContext("2d");
-            const maxVal = Math.max(...Object.values(typeCounts), 1);
+            const maxVal = Math.max(...Object.values(typeCounts || {}), 1);
 
             volumeChartInstance = new window.Chart(ctx, {
                 type: "bar",
@@ -820,37 +815,18 @@ document.addEventListener("DOMContentLoaded", () => {
                                 boxWidth: 12,
                                 color: "#475569"
                             }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return ` ${context.dataset.label}: ${context.raw} caso(s)`;
-                                }
-                            }
                         }
                     },
                     scales: {
                         y: {
                             beginAtZero: true,
                             suggestedMax: maxVal + 1,
-                            ticks: {
-                                stepSize: 1,
-                                precision: 0,
-                                color: "#64748b",
-                                font: { size: 11 }
-                            },
-                            grid: {
-                                color: "#e2e8f0"
-                            }
+                            ticks: { stepSize: 1, precision: 0, color: "#64748b" },
+                            grid: { color: "#e2e8f0" }
                         },
                         x: {
-                            ticks: {
-                                color: "#475569",
-                                font: { size: 12, weight: "500" }
-                            },
-                            grid: {
-                                display: false
-                            }
+                            ticks: { color: "#475569", font: { size: 12, weight: "500" } },
+                            grid: { display: false }
                         }
                     }
                 }
@@ -858,17 +834,157 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function renderExecutiveReportDoc(report, rawTickets, typeCounts, totalTickets, monthName, year) {
-        // Section 1: Volumen de Casos
-        renderVolumeSection(typeCounts, totalTickets, monthName, year);
+    function renderAvgDaysSection(tickets, avgDays, monthName) {
+        const monthLbl = document.getElementById("doc-avg-month-label");
+        if (monthLbl) monthLbl.textContent = monthName;
 
-        // Section 2: Resumen de Soporte Header
-        elements.docSectionHeader.innerHTML = "2. &nbsp; RESUMEN DE SOPORTE";
-        
-        // Section 2: Intro paragraph
+        const daysNum = document.getElementById("doc-avg-days-num");
+        if (daysNum) daysNum.textContent = avgDays;
+
+        const daysFooter = document.getElementById("doc-avg-days-footer");
+        if (daysFooter) daysFooter.textContent = avgDays;
+
+        const tbody = document.getElementById("avg-days-table-tbody");
+        if (tbody) {
+            const rowsHtml = (tickets || []).map(t => {
+                return `
+                <tr>
+                    <td><strong>${t.id}</strong></td>
+                    <td title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</td>
+                    <td>${t.create_date ? t.create_date.replace("T", " ") : "-"}</td>
+                    <td>${t.end_date ? t.end_date.replace("T", " ") : "-"}</td>
+                    <td style="text-align: center;">${t.days_spent || 1}</td>
+                </tr>
+                `;
+            }).join("");
+            tbody.innerHTML = rowsHtml;
+        }
+    }
+
+    function renderHoursSection(tickets, totalHours, monthName, year) {
+        const monthLbl = document.getElementById("doc-hours-month-label");
+        if (monthLbl) monthLbl.textContent = `${monthName} ${year}`;
+
+        const totalVal = document.getElementById("doc-total-hours-val");
+        if (totalVal) totalVal.textContent = totalHours.toFixed(2);
+
+        const tbody = document.getElementById("hours-table-tbody");
+        if (tbody) {
+            const rowsHtml = (tickets || []).map(t => {
+                return `
+                <tr>
+                    <td><strong>${t.id}</strong></td>
+                    <td title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</td>
+                    <td>${escapeHtml(t.stage || "Closed")}</td>
+                    <td style="text-align: center;">${(t.hours_spent || 0).toFixed(2)}</td>
+                </tr>
+                `;
+            }).join("");
+            tbody.innerHTML = rowsHtml;
+        }
+    }
+
+    function renderStagesSection(stageCounts, totalTickets, monthName, year) {
+        const monthLbl = document.getElementById("doc-stages-month-label");
+        if (monthLbl) monthLbl.textContent = monthName;
+
+        const totalVal = document.getElementById("doc-stages-total-val");
+        if (totalVal) totalVal.textContent = totalTickets;
+
+        const standardStages = [
+            "New",
+            "Work in Progress",
+            "Waiting for Customer",
+            "Waiting for Vendor",
+            "Solved",
+            "Closed",
+            "Archived"
+        ];
+
+        const tbody = document.getElementById("stages-table-tbody");
+        if (tbody) {
+            let rowsHtml = "";
+            standardStages.forEach(st => {
+                const count = (stageCounts && stageCounts[st] !== undefined) ? stageCounts[st] : 0;
+                rowsHtml += `
+                <tr>
+                    <td>${escapeHtml(st)}</td>
+                    <td class="td-count">${count}</td>
+                </tr>
+                `;
+            });
+            tbody.innerHTML = rowsHtml;
+        }
+
+        const chartTitle = document.getElementById("stages-chart-title");
+        if (chartTitle) chartTitle.textContent = `Estado de Tickets - ${monthName} ${year}`;
+
+        const canvas = document.getElementById("stages-chart-canvas");
+        if (canvas && window.Chart) {
+            if (stagesChartInstance) {
+                stagesChartInstance.destroy();
+            }
+
+            const ctx = canvas.getContext("2d");
+            const values = standardStages.map(st => (stageCounts && stageCounts[st]) ? stageCounts[st] : 0);
+            const maxVal = Math.max(...values, 1);
+
+            stagesChartInstance = new window.Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels: standardStages,
+                    datasets: [{
+                        label: "Tickets por Estado",
+                        data: values,
+                        backgroundColor: "#f97316",
+                        borderColor: "#ea580c",
+                        borderWidth: 1,
+                        borderRadius: 2,
+                        barThickness: 28,
+                        maxBarThickness: 34
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 600 },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: "bottom",
+                            labels: { font: { family: "Inter", size: 12 }, boxWidth: 12, color: "#475569" }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            suggestedMax: maxVal + 1,
+                            ticks: { stepSize: 1, precision: 0, color: "#64748b" },
+                            grid: { color: "#e2e8f0" }
+                        },
+                        x: {
+                            ticks: { color: "#475569", font: { size: 11, weight: "500" } },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    function renderExecutiveReportDoc(report, rawTickets, fullData) {
+        const typeCounts = fullData.type_counts || {};
+        const totalTickets = fullData.total_tickets || 0;
+        const monthName = fullData.month_name || "Mes";
+        const year = fullData.year || 2026;
+        const avgDays = fullData.avg_days || 0;
+        const totalHours = fullData.total_hours || 0.0;
+        const stageCounts = fullData.stage_counts || {};
+
+        // SECTION 1: 1. RESUMEN DE SOPORTE (Image 1 & 2 exact order)
+        elements.docSectionHeader.innerHTML = "1. &nbsp; RESUMEN DE SOPORTE";
         elements.docIntroText.textContent = report.intro || "";
 
-        // Section 2: Ticket Items (Exact layout of Image 2)
         const itemsHtml = (report.tickets || []).map(t => {
             const matchedRaw = rawTickets.find(r => r.id === t.id);
             const odooUrl = matchedRaw ? matchedRaw.odoo_url : "#";
@@ -883,19 +999,41 @@ document.addEventListener("DOMContentLoaded", () => {
             </div>
             `;
         }).join("");
-
         elements.docItemsContainer.innerHTML = itemsHtml;
+
+        // SECTION 2: 2. VOLUMEN DE CASOS (Image 3)
+        renderVolumeSection(typeCounts, totalTickets, monthName, year);
+
+        // SECTION 3: TIEMPO PROMEDIO (Image 4 Top)
+        renderAvgDaysSection(rawTickets, avgDays, monthName);
+
+        // SECTION 4: HISTORIAL DE HORAS (Image 4 Bottom & Image 5 Top)
+        renderHoursSection(rawTickets, totalHours, monthName, year);
+
+        // SECTION 5: ESTADO DE LOS TICKETS (Image 5 Bottom)
+        renderStagesSection(stageCounts, totalTickets, monthName, year);
+
         updateIcons();
     }
 
-    // Copy Full Report Text formatted for Word/Docs/Email
+    // Copy Full Report Text formatted for Word/Docs/Email (All 5 Sections)
     if (elements.btnCopyReportText) {
         elements.btnCopyReportText.addEventListener("click", () => {
-            const volIntro = document.getElementById("doc-volume-intro")?.innerText.trim() || "";
-            const sec2Header = elements.docSectionHeader?.innerText.trim() || "2. RESUMEN DE SOPORTE";
-            const sec2Intro = elements.docIntroText?.innerText.trim() || "";
+            const sec1Header = elements.docSectionHeader?.innerText.trim() || "1. RESUMEN DE SOPORTE";
+            const sec1Intro = elements.docIntroText?.innerText.trim() || "";
             
-            // Section 1 Table Text
+            // Section 1 Cases
+            let sec1Cases = "";
+            document.querySelectorAll(".report-doc-item").forEach(item => {
+                const title = item.querySelector(".report-item-title-link")?.innerText.trim();
+                const desc = item.querySelector(".report-item-desc")?.innerText.trim();
+                if (title && desc) {
+                    sec1Cases += `${title}\n${desc}\n\n`;
+                }
+            });
+
+            // Section 2 Volume
+            const volIntro = document.getElementById("doc-volume-intro")?.innerText.trim() || "";
             let volTableText = "Tipo de caso\tCantidad\n";
             document.querySelectorAll("#volume-table-tbody tr").forEach(tr => {
                 const tds = tr.querySelectorAll("td");
@@ -906,15 +1044,71 @@ document.addEventListener("DOMContentLoaded", () => {
             const totalVal = document.getElementById("volume-total-val")?.innerText.trim() || "0";
             volTableText += `Total\t${totalVal}\n`;
 
-            let fullText = `1. VOLUMEN DE CASOS\n\n${volIntro}\n\n${volTableText}\n\n${sec2Header}\n\n${sec2Intro}\n\n`;
-
-            document.querySelectorAll(".report-doc-item").forEach(item => {
-                const title = item.querySelector(".report-item-title-link")?.innerText.trim();
-                const desc = item.querySelector(".report-item-desc")?.innerText.trim();
-                if (title && desc) {
-                    fullText += `${title}\n${desc}\n\n`;
+            // Section 3 Tiempo Promedio
+            const avgIntro = document.getElementById("doc-avg-days-intro")?.innerText.trim() || "";
+            let avgTableText = "ID\tAsunto\tCreado el\tÚltima actualización\tDías\n";
+            document.querySelectorAll("#avg-days-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 5) {
+                    avgTableText += `${tds[0].innerText.trim()}\t${tds[1].innerText.trim()}\t${tds[2].innerText.trim()}\t${tds[3].innerText.trim()}\t${tds[4].innerText.trim()}\n`;
                 }
             });
+            const avgFooter = document.getElementById("doc-avg-days-footer")?.innerText.trim() || "0";
+            avgTableText += `\t\t\tDías Promedio\t${avgFooter}\n`;
+
+            // Section 4 Historial de Horas
+            const hoursIntro = document.getElementById("doc-hours-intro")?.innerText.trim() || "";
+            let hoursTableText = "ID\tAsunto\tEstado\tHoras\n";
+            document.querySelectorAll("#hours-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 4) {
+                    hoursTableText += `${tds[0].innerText.trim()}\t${tds[1].innerText.trim()}\t${tds[2].innerText.trim()}\t${tds[3].innerText.trim()}\n`;
+                }
+            });
+            const totalHoursVal = document.getElementById("doc-total-hours-val")?.innerText.trim() || "0.00";
+            hoursTableText += `\t\tTotal de horas\t${totalHoursVal}\n`;
+
+            // Section 5 Estado de los tickets
+            const stagesIntro = document.getElementById("doc-stages-intro")?.innerText.trim() || "";
+            let stagesTableText = "Estado\tCantidad\n";
+            document.querySelectorAll("#stages-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 2) {
+                    stagesTableText += `${tds[0].innerText.trim()}\t${tds[1].innerText.trim()}\n`;
+                }
+            });
+            const stagesTotalVal = document.getElementById("doc-stages-total-val")?.innerText.trim() || "0";
+            stagesTableText += `Total\t${stagesTotalVal}\n`;
+
+            const fullText = 
+`${sec1Header}
+
+${sec1Intro}
+
+${sec1Cases}
+2. VOLUMEN DE CASOS
+
+${volIntro}
+
+${volTableText}
+
+TIEMPO PROMEDIO
+
+${avgIntro}
+
+${avgTableText}
+
+HISTORIAL DE HORAS
+
+${hoursIntro}
+
+${hoursTableText}
+
+ESTADO DE LOS TICKETS
+
+${stagesIntro}
+
+${stagesTableText}`;
 
             navigator.clipboard.writeText(fullText.trim()).then(() => {
                 showToast("📋 Informe completo copiado al portapapeles");

@@ -631,6 +631,17 @@ def get_monthly_tickets():
             "support": "Soporte"
         }
 
+        total_days_sum = 0
+        stage_counts = {
+            "New": 0,
+            "Work in Progress": 0,
+            "Waiting for Customer": 0,
+            "Waiting for Vendor": 0,
+            "Solved": 0,
+            "Closed": 0,
+            "Archived": 0
+        }
+
         for t in tickets:
             ticket_id = t["id"]
             type_data = t.get("ticket_type_id")
@@ -642,10 +653,34 @@ def get_monthly_tickets():
             total_hours += hours
 
             stage_data = t.get("stage_id")
-            stage_name = stage_data[1] if stage_data else "Abierto"
+            stage_name = stage_data[1] if stage_data else "Closed"
+            
+            # Match standard stage counts
+            matched_stage = False
+            for st_k in stage_counts.keys():
+                if st_k.lower() in stage_name.lower():
+                    stage_counts[st_k] += 1
+                    matched_stage = True
+                    break
+            if not matched_stage:
+                stage_counts["Closed"] += 1
 
             partner_data = t.get("partner_id")
             client_contact = partner_data[1] if partner_data else "Sin contacto"
+
+            create_date_str = t.get("create_date") or ""
+            end_date_str = t.get("close_date") or t.get("write_date") or create_date_str
+
+            # Calculate calendar days
+            days_spent = 1
+            if create_date_str and end_date_str:
+                try:
+                    c_dt = datetime.strptime(create_date_str, "%Y-%m-%d %H:%M:%S")
+                    e_dt = datetime.strptime(end_date_str, "%Y-%m-%d %H:%M:%S")
+                    days_spent = max(1, round((e_dt - c_dt).total_seconds() / 86400))
+                except Exception:
+                    days_spent = 1
+            total_days_sum += days_spent
 
             desc_clean = strip_html_tags(t.get("description", ""))
 
@@ -676,7 +711,9 @@ def get_monthly_tickets():
                 "type": type_name,
                 "stage": stage_name,
                 "contact": client_contact,
-                "create_date": t.get("create_date"),
+                "create_date": create_date_str,
+                "end_date": end_date_str,
+                "days_spent": days_spent,
                 "hours_spent": hours,
                 "description": desc_clean,
                 "notes": recent_notes[-4:], # Top 4 recent meaningful notes
@@ -684,6 +721,7 @@ def get_monthly_tickets():
             })
 
         month_label = f"{MONTH_NAMES_ES[month]} de {year}"
+        avg_days = round(total_days_sum / len(formatted_tickets)) if formatted_tickets else 0
 
         return jsonify({
             "success": True,
@@ -693,6 +731,8 @@ def get_monthly_tickets():
             "month": month,
             "total_tickets": len(formatted_tickets),
             "total_hours": round(total_hours, 2),
+            "avg_days": avg_days,
+            "stage_counts": stage_counts,
             "type_counts": type_counts,
             "tickets": formatted_tickets
         })
@@ -713,7 +753,7 @@ def generate_monthly_ai_report():
     if not api_key:
         return jsonify({
             "success": False,
-            "error": "Groq IA no está configurado. Ve a Ajustes > Integraciones para ingresar tu API Key."
+            "error": "Groq / DeepSeek IA no está configurado. Ve a Ajustes > Integraciones para ingresar tu API Key."
         }), 400
 
     data = request.get_json() or {}
@@ -724,7 +764,7 @@ def generate_monthly_ai_report():
     if not tickets:
         return jsonify({"success": False, "error": "No hay tickets para generar el resumen."}), 400
 
-    # Build tickets payload for Groq
+    # Build tickets payload for Groq / DeepSeek
     type_counts = {}
     tickets_prompt_list = []
     for idx, t in enumerate(tickets, 1):
@@ -746,7 +786,7 @@ def generate_monthly_ai_report():
 
     prompt = f"""
 Eres un redactor técnico senior de informes ejecutivos de soporte TI para clientes corporativos.
-Genera la sección '2. RESUMEN DE SOPORTE' mensual para el cliente '{client_name}' del período '{period_label}'.
+Genera la sección '1. RESUMEN DE SOPORTE' mensual para el cliente '{client_name}' del período '{period_label}'.
 
 Datos estadísticos:
 - Total casos aperturados en el mes: {len(tickets)}
@@ -756,7 +796,7 @@ Casos registrados en Odoo con sus logs y notas de resolución:
 {chr(10).join(tickets_prompt_list)}
 
 Instrucciones estrictas:
-1. 'section_header': Debe ser '2. RESUMEN DE SOPORTE'
+1. 'section_header': Debe ser '1. RESUMEN DE SOPORTE'
 2. 'intro': Un párrafo con el estilo: 'Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:'
 3. 'tickets': Una lista ordenada donde para CADA ticket devuelves:
    - 'id': número de ID
@@ -765,7 +805,7 @@ Instrucciones estrictas:
 
 Responde ÚNICAMENTE en formato JSON válido con esta estructura:
 {{
-  "section_header": "2. RESUMEN DE SOPORTE",
+  "section_header": "1. RESUMEN DE SOPORTE",
   "intro": "Durante el mes de...",
   "tickets": [
     {{

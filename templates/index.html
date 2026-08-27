@@ -397,11 +397,29 @@
                     <!-- Printable Document Container -->
                     <div class="printable-doc" id="printable-report-area">
                         
-                        <!-- ================= SECTION 1: VOLUMEN DE CASOS ================= -->
+                        <!-- ================= SECTION 1: RESUMEN DE SOPORTE ================= -->
                         <div class="report-section-block">
-                            <!-- Orange Section Header Bar (1. VOLUMEN DE CASOS) -->
+                            <!-- Orange Section Header Bar (1. RESUMEN DE SOPORTE) -->
+                            <div class="report-section-banner" id="doc-section-header">
+                                1. &nbsp; RESUMEN DE SOPORTE
+                            </div>
+
+                            <!-- Intro Paragraph with counts and breakdown -->
+                            <div class="report-doc-intro" id="doc-intro-text" contenteditable="true" title="Clic para editar texto">
+                                Durante el mes de Julio de 2026 se aperturaron 10 casos para este cliente, un breve resumen de ellos es el siguiente:
+                            </div>
+
+                            <!-- Ticket Items List (Title Orange + ID & Summary) -->
+                            <div class="report-doc-items" id="doc-items-container">
+                                <!-- Items injected dynamically -->
+                            </div>
+                        </div>
+
+                        <!-- ================= SECTION 2: VOLUMEN DE CASOS ================= -->
+                        <div class="report-section-block">
+                            <!-- Orange Section Header Bar (2. VOLUMEN DE CASOS) -->
                             <div class="report-section-banner">
-                                1. &nbsp; VOLUMEN DE CASOS
+                                2. &nbsp; VOLUMEN DE CASOS
                             </div>
 
                             <!-- Intro Paragraph -->
@@ -439,21 +457,103 @@
                             </div>
                         </div>
 
-                        <!-- ================= SECTION 2: RESUMEN DE SOPORTE ================= -->
+                        <!-- ================= SECTION 3: TIEMPO PROMEDIO ================= -->
                         <div class="report-section-block">
-                            <!-- Orange Section Header Bar (2. RESUMEN DE SOPORTE) -->
-                            <div class="report-section-banner" id="doc-section-header">
-                                2. &nbsp; RESUMEN DE SOPORTE
+                            <h3 class="report-subheading-orange">TIEMPO PROMEDIO</h3>
+                            
+                            <div class="report-doc-intro" id="doc-avg-days-intro" contenteditable="true" title="Clic para editar texto">
+                                El tiempo promedio desde apertura hasta cierre de los casos en <span id="doc-avg-month-label">Julio</span> fue de <span id="doc-avg-days-num">0</span> días calendario.
                             </div>
 
-                            <!-- Intro Paragraph with counts and breakdown -->
-                            <div class="report-doc-intro" id="doc-intro-text" contenteditable="true" title="Clic para editar texto">
-                                Durante el mes de Julio de 2026 se aperturaron 10 casos para este cliente, un breve resumen de ellos es el siguiente:
+                            <div class="data-doc-table-wrapper">
+                                <table class="custom-report-doc-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 80px;">ID</th>
+                                            <th>Asunto</th>
+                                            <th>Creado el</th>
+                                            <th>Última actualización</th>
+                                            <th style="width: 70px; text-align: center;">Días</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="avg-days-table-tbody">
+                                        <!-- Injected ticket days rows -->
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="volume-total-row">
+                                            <td colspan="4" style="text-align: right; color: #64748b; font-style: italic;">Días Promedio</td>
+                                            <td style="text-align: center;"><strong id="doc-avg-days-footer">0</strong></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- ================= SECTION 4: HISTORIAL DE HORAS ================= -->
+                        <div class="report-section-block">
+                            <h3 class="report-subheading-orange">HISTORIAL DE HORAS</h3>
+                            
+                            <div class="report-doc-intro" id="doc-hours-intro" contenteditable="true" title="Clic para editar texto">
+                                Horas registradas — Casos aperturados en <span id="doc-hours-month-label">Julio 2026</span>
                             </div>
 
-                            <!-- Ticket Items List (Title Orange + ID & Summary) -->
-                            <div class="report-doc-items" id="doc-items-container">
-                                <!-- Items injected dynamically -->
+                            <div class="data-doc-table-wrapper">
+                                <table class="custom-report-doc-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 80px;">ID</th>
+                                            <th>Asunto</th>
+                                            <th style="width: 110px;">Estado</th>
+                                            <th style="width: 80px; text-align: center;">Horas</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="hours-table-tbody">
+                                        <!-- Injected ticket hours rows -->
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="volume-total-row">
+                                            <td colspan="3" style="text-align: right; color: #64748b; font-style: italic;">Total de horas</td>
+                                            <td style="text-align: center;"><strong id="doc-total-hours-val">0.00</strong></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- ================= SECTION 5: ESTADO DE LOS TICKETS ================= -->
+                        <div class="report-section-block">
+                            <h3 class="report-subheading-orange">ESTADO DE LOS TICKETS</h3>
+                            
+                            <div class="report-doc-intro" id="doc-stages-intro" contenteditable="true" title="Clic para editar texto">
+                                Gráfica de barra del estado de los tickets del mes de <span id="doc-stages-month-label">Julio</span>, todos los casos se encuentran actualmente cerrados, comparto tabla de ellos y grafico de Barras.
+                            </div>
+
+                            <div class="volume-table-wrapper">
+                                <table class="volume-doc-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Estado</th>
+                                            <th class="th-count">Cantidad</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="stages-table-tbody">
+                                        <!-- Injected stage distribution rows -->
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="volume-total-row">
+                                            <td><strong>Total</strong></td>
+                                            <td class="td-count"><strong id="doc-stages-total-val">0</strong></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+
+                            <!-- Stage Bar Chart -->
+                            <div class="volume-chart-card">
+                                <div class="chart-title" id="stages-chart-title">Estado de Tickets - Julio 2026</div>
+                                <div class="chart-canvas-wrapper">
+                                    <canvas id="stages-chart-canvas"></canvas>
+                                </div>
                             </div>
                         </div>
 
@@ -543,30 +643,30 @@
                         <form id="groq-settings-form" class="settings-form">
                             <div class="form-group">
                                 <label for="groq-api-key">
-                                    <i data-lucide="key" class="input-icon"></i> Groq API Key
+                                    <i data-lucide="key" class="input-icon"></i> API Key (Groq o DeepSeek)
                                 </label>
                                 <div class="password-wrapper">
                                     <input 
                                         type="password" 
                                         id="groq-api-key" 
-                                        placeholder="gsk_xxxxxxxxxxxxxxxxxxxx" 
+                                        placeholder="gsk_... o sk-..." 
                                         autocomplete="off"
                                     />
                                     <button type="button" id="toggle-groq-key" class="btn-icon">
                                         <i data-lucide="eye"></i>
                                     </button>
                                 </div>
-                                <small class="form-hint">Obtén tu API key gratuita en <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com</a></small>
+                                <small class="form-hint">Soporta Groq API Key (<a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com</a>) o DeepSeek API Key (<a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>)</small>
                             </div>
 
                             <div class="form-group">
                                 <label for="groq-base-url">
-                                    <i data-lucide="globe" class="input-icon"></i> Base URL / Proxy (Opcional)
+                                    <i data-lucide="globe" class="input-icon"></i> Base URL (Opcional - Usar para DeepSeek)
                                 </label>
                                 <input 
                                     type="text" 
                                     id="groq-base-url" 
-                                    placeholder="https://api.groq.com/openai/v1 (o proxy)" 
+                                    placeholder="https://api.deepseek.com (para DeepSeek) o vacío para Groq" 
                                     autocomplete="off"
                                 />
                             </div>
@@ -576,11 +676,16 @@
                                     <i data-lucide="cpu" class="input-icon"></i> Modelo de IA
                                 </label>
                                 <select id="groq-model-select" class="custom-select full-width">
-                                    <option value="openai/gpt-oss-120b" selected>GPT OSS 120B (Recomendado - Razonamiento Superior)</option>
-                                    <option value="openai/gpt-oss-20b">GPT OSS 20B (Ultra Rápido)</option>
-                                    <option value="qwen/qwen3.8-27b">Qwen 3.8 27B</option>
-                                    <option value="qwen/qwen3.6-27b">Qwen 3.6 27B</option>
-                                    <option value="groq/compound">Groq Compound</option>
+                                    <optgroup label="Groq (Ultra-Rápido)">
+                                        <option value="openai/gpt-oss-120b" selected>GPT OSS 120B (Recomendado - Razonamiento)</option>
+                                        <option value="openai/gpt-oss-20b">GPT OSS 20B (Ultra Rápido)</option>
+                                        <option value="qwen/qwen3.8-27b">Qwen 3.8 27B</option>
+                                        <option value="groq/compound">Groq Compound</option>
+                                    </optgroup>
+                                    <optgroup label="DeepSeek (Requiere Base URL https://api.deepseek.com)">
+                                        <option value="deepseek-chat">DeepSeek V3 (deepseek-chat)</option>
+                                        <option value="deepseek-reasoner">DeepSeek R1 (deepseek-reasoner)</option>
+                                    </optgroup>
                                 </select>
                             </div>
 

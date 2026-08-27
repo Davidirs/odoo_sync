@@ -1767,6 +1767,62 @@ body {
     width: 100%;
 }
 
+/* Subheadings (TIEMPO PROMEDIO, HISTORIAL DE HORAS, ESTADO DE LOS TICKETS) */
+.report-subheading-orange {
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: 800;
+    color: #ff4500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0;
+    padding-bottom: 4px;
+}
+
+/* =========================================================
+   CUSTOM REPORT DOC DATA TABLES (TIEMPO, HORAS, ESTADOS)
+   ========================================================= */
+
+.data-doc-table-wrapper {
+    margin: 6px 0;
+    width: 100%;
+    overflow-x: auto;
+}
+
+.custom-report-doc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    border: 1px solid #fdba74;
+}
+
+.custom-report-doc-table th {
+    background: #ff4500;
+    color: #ffffff;
+    padding: 8px 12px;
+    font-weight: 700;
+    text-align: left;
+    border: 1px solid #ea580c;
+    font-size: 12.5px;
+    white-space: nowrap;
+}
+
+.custom-report-doc-table td {
+    padding: 8px 12px;
+    border: 1px solid #fed7aa;
+    color: #333333;
+    font-size: 12.5px;
+}
+
+.custom-report-doc-table tr:nth-child(even) td {
+    background: #fffaf5;
+}
+
+.custom-report-doc-table td strong {
+    font-weight: 700;
+    color: #0f172a;
+}
+
 .report-doc-items {
     display: flex;
     flex-direction: column;
