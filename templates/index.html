@@ -368,12 +368,23 @@
                 <!-- AI Loading Progress Card -->
                 <div id="report-ai-loading" class="report-loading-card glass-panel hidden">
                     <div class="ai-pulse-orb">⚡</div>
-                    <h3 class="loading-title">Extrayendo logs de Odoo y redactando reporte con Groq IA...</h3>
-                    <p class="loading-subtitle">Analizando notas internas, resoluciones y categorización del cliente</p>
+                    <h3 class="loading-title" id="report-loading-title">Procesando reporte con IA...</h3>
+                    <p class="loading-subtitle" id="report-loading-subtitle">Iniciando análisis de tickets y notas de Odoo</p>
+                    
+                    <!-- Progress Bar & Counter -->
+                    <div class="report-progress-wrapper">
+                        <div class="report-progress-bar-bg">
+                            <div class="report-progress-bar-fill" id="report-progress-fill" style="width: 0%;"></div>
+                        </div>
+                        <div class="report-progress-labels">
+                            <span id="report-progress-status-text">Preparando casos...</span>
+                            <span id="report-progress-counter">0%</span>
+                        </div>
+                    </div>
+
                     <div class="skeleton-ai-lines">
                         <div class="sk-line"></div>
                         <div class="sk-line half"></div>
-                        <div class="sk-line"></div>
                     </div>
                 </div>
 
@@ -683,6 +694,8 @@
                                         <option value="groq/compound">Groq Compound</option>
                                     </optgroup>
                                     <optgroup label="DeepSeek (Requiere Base URL https://api.deepseek.com)">
+                                        <option value="deepseek-v4-flash">DeepSeek V4 Flash (deepseek-v4-flash)</option>
+                                        <option value="deepseek-v4-pro">DeepSeek V4 Pro (deepseek-v4-pro)</option>
                                         <option value="deepseek-chat">DeepSeek V3 (deepseek-chat)</option>
                                         <option value="deepseek-reasoner">DeepSeek R1 (deepseek-reasoner)</option>
                                     </optgroup>

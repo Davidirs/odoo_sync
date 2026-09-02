@@ -138,6 +138,11 @@ document.addEventListener("DOMContentLoaded", () => {
         statTicketsCount: document.getElementById("stat-tickets-count"),
         statTotalHours: document.getElementById("stat-total-hours"),
         reportAiLoading: document.getElementById("report-ai-loading"),
+        reportLoadingTitle: document.getElementById("report-loading-title"),
+        reportLoadingSubtitle: document.getElementById("report-loading-subtitle"),
+        reportProgressFill: document.getElementById("report-progress-fill"),
+        reportProgressStatusText: document.getElementById("report-progress-status-text"),
+        reportProgressCounter: document.getElementById("report-progress-counter"),
         executiveReportCard: document.getElementById("executive-report-card"),
         docSectionHeader: document.getElementById("doc-section-header"),
         docIntroText: document.getElementById("doc-intro-text"),
@@ -687,9 +692,28 @@ document.addEventListener("DOMContentLoaded", () => {
             // Render Section 1 (Volumen de Casos Table & Chart)
             renderVolumeSection(data.type_counts || {}, data.total_tickets, data.month_name, data.year);
 
-            // 2. Generate AI Report (Image 2 replica) if requested
+            // 2. Generate AI Report with real-time progress and live batch appending
             if (withAi) {
-                const aiRes = await fetch("/api/reports/generate-ai-report", {
+                // Initialize loading UI
+                if (elements.reportProgressFill) elements.reportProgressFill.style.width = "0%";
+                if (elements.reportProgressCounter) elements.reportProgressCounter.textContent = "0%";
+                if (elements.reportLoadingTitle) elements.reportLoadingTitle.textContent = "Iniciando generación con IA...";
+                if (elements.reportProgressStatusText) elements.reportProgressStatusText.textContent = "Preparando casos...";
+
+                // Show report container and render stats immediately so user sees sections
+                elements.docSectionHeader.innerHTML = "1. &nbsp; RESUMEN DE SOPORTE";
+                elements.docIntroText.textContent = "Generando síntesis con IA...";
+                elements.docItemsContainer.innerHTML = "";
+                renderVolumeSection(data.type_counts || {}, data.total_tickets, data.month_name, data.year);
+                renderAvgDaysSection(data.tickets, data.avg_days, data.month_name);
+                renderHoursSection(data.tickets, data.total_hours, data.month_name, data.year);
+                renderStagesSection(data.stage_counts, data.total_tickets, data.month_name, data.year);
+                elements.executiveReportCard.classList.remove("hidden");
+
+                const accumulatedTickets = [];
+
+                // Fetch with SSE stream
+                const response = await fetch("/api/reports/generate-ai-report?stream=true", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -698,18 +722,86 @@ document.addEventListener("DOMContentLoaded", () => {
                         tickets: data.tickets
                     })
                 });
-                const aiData = await aiRes.json();
 
-                if (aiData.success && aiData.report) {
-                    state.aiReport = aiData.report;
-                    renderExecutiveReportDoc(aiData.report, data.tickets, data);
-                    elements.executiveReportCard.classList.remove("hidden");
-                    showToast("✨ Informe generado con éxito con IA");
-                } else {
-                    showToast(`⚠️ ${aiData.error || "No se pudo generar el texto del informe con IA"}`);
+                if (!response.ok) {
+                    const errJson = await response.json().catch(() => ({}));
+                    throw new Error(errJson.error || `HTTP ${response.status}`);
                 }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n\n");
+                    buffer = lines.pop(); // Keep unfinished line in buffer
+
+                    for (const block of lines) {
+                        const line = block.trim();
+                        if (!line.startsWith("data:")) continue;
+                        try {
+                            const event = JSON.parse(line.substring(5).trim());
+
+                            if (event.type === "step") {
+                                if (elements.reportLoadingTitle) elements.reportLoadingTitle.textContent = event.message;
+                                if (elements.reportProgressStatusText) elements.reportProgressStatusText.textContent = event.message;
+                                if (elements.reportProgressFill) elements.reportProgressFill.style.width = `${event.progress}%`;
+                                if (elements.reportProgressCounter) elements.reportProgressCounter.textContent = `${event.progress}%`;
+                            } else if (event.type === "intro") {
+                                elements.docIntroText.textContent = event.intro || "";
+                                if (elements.reportProgressFill) elements.reportProgressFill.style.width = `${event.progress}%`;
+                                if (elements.reportProgressCounter) elements.reportProgressCounter.textContent = `${event.progress}%`;
+                            } else if (event.type === "batch_tickets") {
+                                const newItems = event.items || [];
+                                (newItems).forEach(t => {
+                                    accumulatedTickets.push(t);
+                                    const matchedRaw = data.tickets.find(r => r.id === t.id);
+                                    const odooUrl = matchedRaw ? matchedRaw.odoo_url : "#";
+
+                                    const div = document.createElement("div");
+                                    div.className = "report-doc-item animate-fade-in";
+                                    div.dataset.ticketId = t.id;
+                                    div.innerHTML = `
+                                        <a href="${odooUrl}" target="_blank" rel="noopener" class="report-item-title-link" title="Abrir #${t.id} en Odoo">
+                                            <span>${escapeHtml(t.title || `Caso #${t.id}`)} (#${t.id})</span>
+                                            <i data-lucide="external-link" style="width: 13px; height: 13px;"></i>
+                                        </a>
+                                        <p class="report-item-desc" contenteditable="true" title="Clic para editar">${escapeHtml(t.summary || "")}</p>
+                                    `;
+                                    elements.docItemsContainer.appendChild(div);
+                                });
+                                updateIcons();
+
+                                const msg = `Completados ${event.processed} de ${event.total} tickets...`;
+                                if (elements.reportLoadingSubtitle) elements.reportLoadingSubtitle.textContent = msg;
+                                if (elements.reportProgressStatusText) elements.reportProgressStatusText.textContent = msg;
+                                if (elements.reportProgressFill) elements.reportProgressFill.style.width = `${event.progress}%`;
+                                if (elements.reportProgressCounter) elements.reportProgressCounter.textContent = `${event.progress}%`;
+                            } else if (event.type === "done") {
+                                if (elements.reportProgressFill) elements.reportProgressFill.style.width = "100%";
+                                if (elements.reportProgressCounter) elements.reportProgressCounter.textContent = "100%";
+                                showToast("✨ ¡Informe mensual generado con éxito!");
+                            } else if (event.type === "error") {
+                                throw new Error(event.error);
+                            }
+                        } catch (e) {
+                            console.error("Error parsing SSE event:", e);
+                        }
+                    }
+                }
+
+                state.aiReport = {
+                    section_header: "1. RESUMEN DE SOPORTE",
+                    intro: elements.docIntroText.textContent,
+                    tickets: accumulatedTickets
+                };
+
             } else {
-                // When only listing tickets, render all 4 statistical sections (Volumen, Tiempo, Horas, Estados)
+                // When only listing tickets without AI
                 renderVolumeSection(data.type_counts || {}, data.total_tickets, data.month_name, data.year);
                 renderAvgDaysSection(data.tickets, data.avg_days, data.month_name);
                 renderHoursSection(data.tickets, data.total_hours, data.month_name, data.year);

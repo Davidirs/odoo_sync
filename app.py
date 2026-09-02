@@ -3,9 +3,10 @@ import json
 import xmlrpc.client
 import secrets
 from datetime import timedelta, datetime
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
+import requests
 import groq
 
 load_dotenv()
@@ -79,6 +80,109 @@ def save_integrations_config(data):
     except Exception as e:
         print(f"Error saving config: {e}")
         return False
+
+def perform_ai_completion(api_key, base_url, model, messages, temperature=0.3, max_tokens=1000, response_format=None):
+    """Execute AI completion supporting Groq as primary and DeepSeek as automatic fallback."""
+    api_key = str(api_key or "").encode("ascii", "ignore").decode("ascii").strip()
+    base_url = str(base_url or "").encode("ascii", "ignore").decode("ascii").strip()
+
+    is_groq = (not base_url or "groq.com" in base_url)
+    
+    if is_groq:
+        try:
+            kwargs = {"api_key": api_key}
+            if base_url:
+                kwargs["base_url"] = base_url
+            client = groq.Groq(**kwargs)
+            extra = {}
+            if response_format:
+                extra["response_format"] = response_format
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **extra
+            )
+            return completion.choices[0].message.content
+        except Exception as groq_err:
+            print(f"⚠️ Groq falló o alcanzó límite ({groq_err}). Evaluando reintento con DeepSeek...")
+            # Check for DeepSeek fallback API Key
+            deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+            if not deepseek_key:
+                cfg = load_integrations_config()
+                deepseek_key = cfg.get("deepseek_api_key", "").strip()
+
+            if not deepseek_key:
+                # No DeepSeek key available, re-raise original Groq error
+                raise groq_err
+
+            print("🔄 Reintentando petición con DeepSeek (deepseek-v4-flash)...")
+            return _call_openai_compatible(
+                api_key=deepseek_key,
+                base_url="https://api.deepseek.com",
+                model="deepseek-v4-flash",
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format
+            )
+    else:
+        # User specified custom base_url (like DeepSeek directly)
+        return _call_openai_compatible(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format
+        )
+
+
+def _call_openai_compatible(api_key, base_url, model, messages, temperature=0.3, max_tokens=2500, response_format=None):
+    """Execute completion against OpenAI-compatible REST API (DeepSeek, etc)."""
+    api_key = str(api_key or "").encode("ascii", "ignore").decode("ascii").strip()
+    base_url = str(base_url or "").encode("ascii", "ignore").decode("ascii").strip()
+
+    clean_url = base_url.rstrip("/")
+    if not clean_url.endswith("/chat/completions"):
+        clean_url = f"{clean_url}/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max(max_tokens, 2500)
+    }
+    if response_format:
+        payload["response_format"] = response_format
+
+    resp = requests.post(clean_url, headers=headers, json=payload, timeout=90)
+    if resp.status_code != 200:
+        err_msg = resp.text
+        try:
+            err_json = resp.json()
+            if "error" in err_json:
+                err_msg = err_json["error"].get("message", resp.text)
+        except Exception:
+            pass
+        raise Exception(f"API Error ({resp.status_code}): {err_msg}")
+
+    data = resp.json()
+    msg_obj = data["choices"][0]["message"]
+    content = msg_obj.get("content") or ""
+    
+    # If model only returned reasoning_content and empty content
+    if not content.strip() and msg_obj.get("reasoning_content"):
+        content = msg_obj.get("reasoning_content")
+
+    return content
+
 
 
 def get_odoo_connection(user, password):
@@ -412,33 +516,34 @@ def test_groq_connection():
     config = load_integrations_config()
     
     if not api_key:
-        api_key = config.get("groq_api_key", "")
+        api_key = config.get("groq_api_key", "").strip()
     if not base_url:
-        base_url = config.get("groq_base_url", "")
+        base_url = config.get("groq_base_url", "").strip()
+
+    # Clean any non-ascii characters from key/url if accidentally pasted
+    api_key = api_key.encode('ascii', 'ignore').decode('ascii').strip()
+    base_url = base_url.encode('ascii', 'ignore').decode('ascii').strip()
 
     if not api_key:
-        return jsonify({"success": False, "error": "No se ha proporcionado una API Key de Groq."}), 400
+        return jsonify({"success": False, "error": "No se ha proporcionado una API Key válida."}), 400
 
     model = data.get("model") or config.get("groq_model", "openai/gpt-oss-120b")
 
     try:
-        kwargs = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        client = groq.Groq(**kwargs)
-        completion = client.chat.completions.create(
+        msg = perform_ai_completion(
+            api_key=api_key,
+            base_url=base_url,
             model=model,
             messages=[
                 {"role": "system", "content": "You are a connectivity test assistant."},
-                {"role": "user", "content": "Responde únicamente: 'Conexión a Groq exitosa.'"}
+                {"role": "user", "content": "Responde únicamente: 'Conexión a IA exitosa.'"}
             ],
-            max_tokens=30,
-            temperature=0.2
+            temperature=0.2,
+            max_tokens=100
         )
-        msg = completion.choices[0].message.content.strip()
-        return jsonify({"success": True, "message": msg})
+        return jsonify({"success": True, "message": msg.strip()})
     except Exception as e:
-        return jsonify({"success": False, "error": f"Error de conexión con Groq: {str(e)}"}), 500
+        return jsonify({"success": False, "error": f"Error de conexión con la IA: {str(e)}"}), 500
 
 
 @app.route("/api/ai/analyze-ticket", methods=["POST"])
@@ -453,7 +558,7 @@ def analyze_ticket_with_ai():
     if not api_key:
         return jsonify({
             "success": False,
-            "error": "Groq IA no está configurado. Ve a Ajustes > Integraciones para ingresar tu API Key de Groq."
+            "error": "La IA no está configurada. Ve a Ajustes > Integraciones para ingresar tu API Key."
         }), 400
 
     data = request.get_json() or {}
@@ -495,11 +600,9 @@ Genera un reporte técnico claro y profesional con las siguientes secciones:
 """
 
     try:
-        kwargs = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        client = groq.Groq(**kwargs)
-        completion = client.chat.completions.create(
+        ai_response = perform_ai_completion(
+            api_key=api_key,
+            base_url=base_url,
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -508,14 +611,13 @@ Genera un reporte técnico claro y profesional con las siguientes secciones:
             temperature=0.3,
             max_tokens=1000
         )
-        ai_response = completion.choices[0].message.content.strip()
         return jsonify({
             "success": True,
-            "analysis": ai_response,
+            "analysis": ai_response.strip(),
             "model_used": model
         })
     except Exception as e:
-        return jsonify({"success": False, "error": f"Error al procesar con Groq IA: {str(e)}"}), 500
+        return jsonify({"success": False, "error": f"Error al procesar con IA: {str(e)}"}), 500
 
 
 # ==========================================
@@ -750,6 +852,7 @@ def generate_monthly_ai_report():
     config = load_integrations_config()
     api_key = config.get("groq_api_key")
     base_url = config.get("groq_base_url")
+    model = config.get("groq_model", "openai/gpt-oss-120b")
     if not api_key:
         return jsonify({
             "success": False,
@@ -817,34 +920,221 @@ Responde ÚNICAMENTE en formato JSON válido con esta estructura:
 }}
 """
 
-    model = config.get("groq_model", "openai/gpt-oss-120b")
-    try:
-        kwargs = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        client = groq.Groq(**kwargs)
+    # Check if client requested streaming SSE
+    is_stream = request.args.get("stream", "false").lower() in ("true", "1")
 
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "Eres un asistente experto que responde estrictamente en JSON válido."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            response_format={"type": "json_object"}
-        )
+    if not is_stream:
+        # Regular JSON response (backward compatibility)
+        try:
+            BATCH_SIZE = 15
+            all_summaries = []
+            intro_prompt = f"""
+Genera únicamente la introducción ejecutiva del reporte de soporte para {client_name} del período {period_label}.
+Datos:
+- Total casos aperturados en el mes: {len(tickets)}
+- Desglose por tipo: {type_breakdown_str}
 
-        raw_json = completion.choices[0].message.content.strip()
-        parsed = json.loads(raw_json)
+Responde ÚNICAMENTE en JSON con formato:
+{{"intro": "Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"}}
+"""
+            intro_raw = perform_ai_completion(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Eres un asistente experto que responde estrictamente en JSON válido."},
+                    {"role": "user", "content": intro_prompt}
+                ],
+                temperature=0.2,
+                max_tokens=600,
+                response_format={"type": "json_object"}
+            )
+            try:
+                intro_clean = intro_raw.strip()
+                s_i = intro_clean.find("{")
+                e_i = intro_clean.rfind("}")
+                if s_i != -1 and e_i != -1:
+                    intro_clean = intro_clean[s_i:e_i+1]
+                intro_text = json.loads(intro_clean).get("intro", f"Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:")
+            except Exception:
+                intro_text = f"Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"
 
-        return jsonify({
-            "success": True,
-            "report": parsed,
-            "model_used": model
-        })
+            for i in range(0, len(tickets), BATCH_SIZE):
+                chunk = tickets[i:i + BATCH_SIZE]
+                chunk_prompt_list = []
+                for c_idx, t in enumerate(chunk, i + 1):
+                    ttype = t.get("type", "Requerimiento")
+                    notes_str = "\n   - ".join(t.get("notes") or []) if t.get("notes") else "Sin notas adicionales."
+                    desc_str = (t.get("description") or "Sin descripción provista.")[:200]
+                    chunk_prompt_list.append(
+                        f"{c_idx}. #{t['id']} - {t['name']} (Tipo: {ttype})\n"
+                        f"   Descripción: {desc_str}\n"
+                        f"   Notas/Logs: {notes_str[:300]}"
+                    )
 
-    except Exception as e:
-        return jsonify({"success": False, "error": f"Error al generar informe con IA: {str(e)}"}), 500
+                batch_prompt = f"""
+Genera el resumen de resolución de estos {len(chunk)} casos de soporte para {client_name}:
+{chr(10).join(chunk_prompt_list)}
+
+Para CADA ticket redacta 'summary' (1 o 2 líneas ejecutivas explicando la resolución según las notas/logs).
+Responde ÚNICAMENTE en JSON con formato:
+{{
+  "tickets": [
+    {{
+      "id": {chunk[0]['id']},
+      "title": "{chunk[0]['name'].replace('"', '')[:50]}",
+      "summary": "Resumen claro y profesional..."
+    }}
+  ]
+}}
+"""
+                batch_raw = perform_ai_completion(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "Eres un redactor técnico que responde estrictamente en JSON válido con la lista 'tickets'."},
+                        {"role": "user", "content": batch_prompt}
+                    ],
+                    temperature=0.2,
+                    max_tokens=2500,
+                    response_format={"type": "json_object"}
+                )
+
+                b_clean = batch_raw.strip()
+                s_idx = b_clean.find("{")
+                e_idx = b_clean.rfind("}")
+                if s_idx != -1 and e_idx != -1:
+                    b_clean = b_clean[s_idx:e_idx+1]
+                batch_data = json.loads(b_clean)
+                all_summaries.extend(batch_data.get("tickets", []))
+
+            return jsonify({
+                "success": True,
+                "report": {
+                    "section_header": "1. RESUMEN DE SOPORTE",
+                    "intro": intro_text,
+                    "tickets": all_summaries
+                },
+                "model_used": model
+            })
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Error al generar informe con IA: {str(e)}"}), 500
+
+    # STREAMING SSE MODE
+    def generate_events():
+        try:
+            BATCH_SIZE = 15
+            total_batches = (len(tickets) + BATCH_SIZE - 1) // BATCH_SIZE
+
+            # Event 1: Starting
+            yield f"data: {json.dumps({'type': 'start', 'total_tickets': len(tickets), 'total_batches': total_batches})}\n\n"
+
+            # 1. Generate Intro
+            yield f"data: {json.dumps({'type': 'step', 'message': 'Redactando introducción ejecutiva...', 'progress': 5})}\n\n"
+            intro_prompt = f"""
+Genera únicamente la introducción ejecutiva del reporte de soporte para {client_name} del período {period_label}.
+Datos:
+- Total casos aperturados en el mes: {len(tickets)}
+- Desglose por tipo: {type_breakdown_str}
+
+Responde ÚNICAMENTE en JSON con formato:
+{{"intro": "Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"}}
+"""
+            intro_text = f"Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"
+            try:
+                intro_raw = perform_ai_completion(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "Eres un asistente experto que responde estrictamente en JSON válido."},
+                        {"role": "user", "content": intro_prompt}
+                    ],
+                    temperature=0.2,
+                    max_tokens=600,
+                    response_format={"type": "json_object"}
+                )
+                intro_clean = intro_raw.strip()
+                s_i = intro_clean.find("{")
+                e_i = intro_clean.rfind("}")
+                if s_i != -1 and e_i != -1:
+                    intro_clean = intro_clean[s_i:e_i+1]
+                intro_text = json.loads(intro_clean).get("intro", intro_text)
+            except Exception:
+                pass
+
+            yield f"data: {json.dumps({'type': 'intro', 'intro': intro_text, 'progress': 15})}\n\n"
+
+            # 2. Process in chunks and stream items as they finish
+            processed_count = 0
+            for batch_num, i in enumerate(range(0, len(tickets), BATCH_SIZE), 1):
+                chunk = tickets[i:i + BATCH_SIZE]
+                chunk_prompt_list = []
+                for c_idx, t in enumerate(chunk, i + 1):
+                    ttype = t.get("type", "Requerimiento")
+                    notes_str = "\n   - ".join(t.get("notes") or []) if t.get("notes") else "Sin notas adicionales."
+                    desc_str = (t.get("description") or "Sin descripción provista.")[:200]
+                    chunk_prompt_list.append(
+                        f"{c_idx}. #{t['id']} - {t['name']} (Tipo: {ttype})\n"
+                        f"   Descripción: {desc_str}\n"
+                        f"   Notas/Logs: {notes_str[:300]}"
+                    )
+                first_id = chunk[0].get("id")
+                last_id = chunk[-1].get("id")
+                step_msg = f"Analizando bloque {batch_num}/{total_batches} (tickets #{first_id} a #{last_id})..."
+                step_pct = 15 + int((batch_num - 1) / total_batches * 80)
+                yield f"data: {json.dumps({'type': 'step', 'message': step_msg, 'progress': step_pct})}\n\n"
+
+                batch_prompt = f"""
+Genera el resumen de resolución de estos {len(chunk)} casos de soporte para {client_name}:
+{chr(10).join(chunk_prompt_list)}
+
+Para CADA ticket redacta 'summary' (1 o 2 líneas ejecutivas explicando la resolución según las notas/logs).
+Responde ÚNICAMENTE en JSON con formato:
+{{
+  "tickets": [
+    {{
+      "id": {chunk[0]['id']},
+      "title": "{chunk[0]['name'].replace('"', '')[:50]}",
+      "summary": "Resumen claro y profesional..."
+    }}
+  ]
+}}
+"""
+                batch_raw = perform_ai_completion(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "Eres un redactor técnico que responde estrictamente en JSON válido con la lista 'tickets'."},
+                        {"role": "user", "content": batch_prompt}
+                    ],
+                    temperature=0.2,
+                    max_tokens=2500,
+                    response_format={"type": "json_object"}
+                )
+
+                b_clean = batch_raw.strip()
+                s_idx = b_clean.find("{")
+                e_idx = b_clean.rfind("}")
+                if s_idx != -1 and e_idx != -1:
+                    b_clean = b_clean[s_idx:e_idx+1]
+                batch_data = json.loads(b_clean)
+                batch_items = batch_data.get("tickets", [])
+                processed_count += len(batch_items)
+
+                # Stream these tickets to UI immediately
+                pct = 15 + int((batch_num / total_batches) * 80)
+                yield f"data: {json.dumps({'type': 'batch_tickets', 'items': batch_items, 'processed': processed_count, 'total': len(tickets), 'progress': pct})}\n\n"
+
+            # Event: Finished
+            yield f"data: {json.dumps({'type': 'done', 'progress': 100, 'message': 'Informe completado exitosamente'})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+    return Response(generate_events(), mimetype="text/event-stream")
 
 
 @app.route("/api/reports/regenerate-single-summary", methods=["POST"])
@@ -857,7 +1147,7 @@ def regenerate_single_summary():
     api_key = config.get("groq_api_key")
     base_url = config.get("groq_base_url")
     if not api_key:
-        return jsonify({"success": False, "error": "Groq IA no está configurado."}), 400
+        return jsonify({"success": False, "error": "La IA no está configurada."}), 400
 
     data = request.get_json() or {}
     ticket = data.get("ticket") or {}
@@ -877,12 +1167,9 @@ Responde ÚNICAMENTE con el párrafo del resumen en español neutro sin introduc
 
     model = config.get("groq_model", "openai/gpt-oss-120b")
     try:
-        kwargs = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        client = groq.Groq(**kwargs)
-
-        completion = client.chat.completions.create(
+        summary = perform_ai_completion(
+            api_key=api_key,
+            base_url=base_url,
             model=model,
             messages=[
                 {"role": "system", "content": "Eres un redactor técnico que resume casos en 1 párrafo claro."},
@@ -891,8 +1178,7 @@ Responde ÚNICAMENTE con el párrafo del resumen en español neutro sin introduc
             temperature=0.2,
             max_tokens=300
         )
-        summary = completion.choices[0].message.content.strip()
-        return jsonify({"success": True, "summary": summary})
+        return jsonify({"success": True, "summary": summary.strip()})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
