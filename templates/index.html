@@ -139,7 +139,7 @@
                     </div>
                 </div>
 
-                <!-- Navigation Tabs: Monitor vs Informes Mensuales -->
+                <!-- Navigation Tabs: Monitor vs Informes Mensuales vs Diapositivas Ejecutivas -->
                 <nav class="nav-tab-switcher">
                     <button class="nav-tab-btn active" id="tab-nav-monitor" data-view="monitor">
                         <i data-lucide="layout-dashboard"></i>
@@ -148,6 +148,10 @@
                     <button class="nav-tab-btn" id="tab-nav-reports" data-view="reports">
                         <i data-lucide="file-bar-chart-2"></i>
                         <span>Informes por Cliente</span>
+                    </button>
+                    <button class="nav-tab-btn" id="tab-nav-executive" data-view="executive">
+                        <i data-lucide="presentation"></i>
+                        <span>Diapositivas Ejecutivas</span>
                     </button>
                 </nav>
 
@@ -607,6 +611,332 @@
                     </div>
                     <h3>Generador de Informes Mensuales</h3>
                     <p>Selecciona un cliente y el mes correspondiente para obtener la síntesis ejecutiva de soporte y el resumen de cada ticket según sus notas y logs.</p>
+                </div>
+
+            </main>
+
+            <!-- ================= VIEW 3: REPORTE EJECUTIVO DE SOPORTE Y HORAS (DIAPOSITIVA MAESTRA) ================= -->
+            <main id="view-executive" class="app-content app-view-container hidden">
+
+                <!-- 1. Executive Filter Toolbar (Full Width) -->
+                <div class="exec-filter-panel glass-panel">
+                    <div class="exec-filter-grid">
+                        
+                        <!-- Helpdesk Team Select -->
+                        <div class="form-group-filter">
+                            <label for="exec-entity-select" class="form-filter-lbl">
+                                <i data-lucide="headphones"></i> Equipo Helpdesk:
+                            </label>
+                            <select id="exec-entity-select" class="custom-select full-width">
+                                <option value="">Cargando equipos de Helpdesk...</option>
+                            </select>
+                        </div>
+
+                        <!-- Date Filter: Calendar Range (Desde / Hasta) -->
+                        <div class="form-group-filter-dates">
+                            <div class="date-select-col">
+                                <label for="exec-date-start" class="form-filter-lbl">
+                                    <i data-lucide="calendar"></i> Desde:
+                                </label>
+                                <input type="date" id="exec-date-start" class="custom-date-input full-width">
+                            </div>
+                            <div class="date-select-col">
+                                <label for="exec-date-end" class="form-filter-lbl">
+                                    <i data-lucide="calendar-check"></i> Hasta:
+                                </label>
+                                <input type="date" id="exec-date-end" class="custom-date-input full-width">
+                            </div>
+                        </div>
+
+                        <!-- Horas Totales Disponibles (Editable Input) -->
+                        <div class="form-group-filter">
+                            <label for="exec-contract-hours" class="form-filter-lbl" title="Define las horas totales contratadas / disponibles del período">
+                                <i data-lucide="clock"></i> Horas Totales Disponibles:
+                            </label>
+                            <div class="input-with-suffix">
+                                <input type="number" id="exec-contract-hours" class="custom-num-input" value="120" step="10" min="0">
+                                <span class="input-suffix">hrs</span>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Toolbar Actions Row -->
+                    <div class="exec-actions-bar">
+                        <div class="exec-presets-chips">
+                            <span class="preset-label">Rango rápido:</span>
+                            <button type="button" class="btn-chip active" id="preset-july-2026">Julio 2026</button>
+                            <button type="button" class="btn-chip" id="preset-this-month">Mes Actual</button>
+                            <button type="button" class="btn-chip" id="preset-last-30">Últimos 30 días</button>
+                            <button type="button" class="btn-chip" id="preset-year-2026">Año 2026</button>
+                        </div>
+
+                        <div class="exec-btn-cluster">
+                            <button id="btn-exec-generate" class="btn-primary">
+                                <i data-lucide="search"></i>
+                                <span>Cargar Reporte</span>
+                            </button>
+                            <button id="btn-exec-capture-mode" class="btn-secondary" title="Ajusta la vista a pantalla ancha para captura de diapositiva">
+                                <i data-lucide="camera"></i>
+                                <span>Modo Diapositiva (16:9)</span>
+                            </button>
+                            <button id="btn-exec-print" class="btn-secondary" title="Imprimir o guardar como PDF">
+                                <i data-lucide="printer"></i>
+                                <span>Imprimir / PDF</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading Spinner State -->
+                <div id="exec-loading-state" class="exec-loading-card glass-panel hidden">
+                    <div class="spinner-ring"></div>
+                    <h3 class="loading-title">Consultando métricas y tickets de Odoo...</h3>
+                    <p class="loading-subtitle">Calculando tiempos de resolución y horas por colaborador</p>
+                </div>
+
+                <!-- MASTER SLIDE CONTAINER (Full Widescreen Edge-to-Edge) -->
+                <div class="slides-container" id="slides-master-container">
+
+                    <!-- =========================================================
+                         MASTER SLIDE: REPORTE EJECUTIVO DE SOPORTE Y HORAS
+                         ========================================================= -->
+                    <section class="slide-card slide-master-theme" id="slide-master-card">
+                        
+                        <!-- Navy Corporate Header -->
+                        <header class="slide-master-header">
+                            <div class="sm-header-left">
+                                <div class="sm-header-icon">
+                                    <i data-lucide="headphones"></i>
+                                </div>
+                                <div>
+                                    <h1 class="sm-main-title" id="s-main-title">Tecniscan — Reporte Ejecutivo de Soporte y Horas</h1>
+                                    <p class="sm-main-period" id="s-main-period">Período: 01 al 31 de julio de 2026 · Genesys Cloud CX</p>
+                                </div>
+                            </div>
+                            <div class="sm-header-right">
+                                <div class="sm-brand-tag">GENESYS CLOUD CX</div>
+                                <div class="sm-brand-sub">ESMT CONSULTING</div>
+                            </div>
+                        </header>
+
+                        <!-- Top 7 KPI Metrics Ribbon -->
+                        <div class="slide-master-kpi-ribbon">
+                            
+                            <!-- KPI 1: Horas Totales Disponibles (Blue) -->
+                            <div class="sm-kpi-card card-blue">
+                                <span class="sm-kpi-lbl text-blue">HORAS TOTALES DISPONIBLES</span>
+                                <div class="sm-kpi-val text-blue-dark" id="s-kpi-total-avail">120.00</div>
+                                <span class="sm-kpi-sub">Horas contratadas</span>
+                            </div>
+
+                            <!-- KPI 2: Horas Utilizadas (Green) -->
+                            <div class="sm-kpi-card card-green">
+                                <span class="sm-kpi-lbl text-green">HORAS UTILIZADAS</span>
+                                <div class="sm-kpi-val text-green-dark" id="s-kpi-total-used">8.50</div>
+                                <span class="sm-kpi-sub">Soporte registrado</span>
+                            </div>
+
+                            <!-- KPI 3: Horas Disponibles Restantes (Amber) -->
+                            <div class="sm-kpi-card card-amber">
+                                <span class="sm-kpi-lbl text-amber">HORAS DISPONIBLES RESTANTES</span>
+                                <div class="sm-kpi-val text-amber-dark" id="s-kpi-total-rem">111.50</div>
+                                <span class="sm-kpi-sub">Horas a favor</span>
+                            </div>
+
+                            <!-- KPI 4: % de Utilización (Purple) -->
+                            <div class="sm-kpi-card card-purple">
+                                <span class="sm-kpi-lbl text-purple">% DE UTILIZACIÓN</span>
+                                <div class="sm-kpi-val text-purple-dark" id="s-kpi-total-util">7.08%</div>
+                                <span class="sm-kpi-sub">De capacidad total</span>
+                            </div>
+
+                            <!-- KPI 5: Total Casos (Cyan) -->
+                            <div class="sm-kpi-card card-cyan">
+                                <span class="sm-kpi-lbl text-cyan">TOTAL DE CASOS</span>
+                                <div class="sm-kpi-val text-dark" id="s-kpi-total-cases">11</div>
+                                <span class="sm-kpi-sub" id="s-kpi-types-breakdown">10 req · 1 incidente</span>
+                            </div>
+
+                            <!-- KPI 6: Tickets Cerrados (Teal) -->
+                            <div class="sm-kpi-card card-teal">
+                                <span class="sm-kpi-lbl text-teal">TICKETS CERRADOS</span>
+                                <div class="sm-kpi-val text-teal-dark" id="s-kpi-closed-ratio">11 / 11</div>
+                                <span class="sm-kpi-sub" id="s-kpi-closed-pct">100.0% resueltos</span>
+                            </div>
+
+                            <!-- KPI 7: Tiempo Promedio (Red) -->
+                            <div class="sm-kpi-card card-red">
+                                <span class="sm-kpi-lbl text-red">TIEMPO PROMEDIO</span>
+                                <div class="sm-kpi-val text-red" id="s-kpi-avg-days">7 días</div>
+                                <span class="sm-kpi-sub" id="s-kpi-longest-sub">Max: 20 d</span>
+                            </div>
+
+                        </div>
+
+                        <!-- 3-Column Content Layout Across Full Widescreen -->
+                        <div class="slide-master-body-grid">
+                            
+                            <!-- ================= COLUMN 1: RESUMEN DE TICKETS ================= -->
+                            <div class="sm-col sm-col-tickets">
+                                <div class="sm-panel">
+                                    <div class="sm-panel-banner banner-blue">
+                                        <span>RESUMEN DE SOPORTE — <span id="s-ticket-count-badge">11</span> CASOS</span>
+                                        <i data-lucide="list"></i>
+                                    </div>
+                                    <div class="sm-ticket-list-wrapper" id="s-ticket-list">
+                                        <!-- Dynamic Ticket Rows -->
+                                    </div>
+                                    <div class="sm-longest-case-pill" id="s-longest-case-box">
+                                        <div class="longest-case-icon">
+                                            <i data-lucide="alert-circle"></i>
+                                        </div>
+                                        <div class="longest-case-text">
+                                            <span class="longest-lbl">Caso de mayor duración:</span>
+                                            <strong id="s-longest-case-desc">#11240 - Errores en la plataforma (20 días)</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ================= COLUMN 2: HORAS POR COLABORADOR ================= -->
+                            <div class="sm-col sm-col-collabs">
+                                
+                                <!-- Detalle por Colaborador Table Card -->
+                                <div class="sm-panel">
+                                    <div class="sm-panel-banner banner-navy">
+                                        <span>DETALLE POR COLABORADOR</span>
+                                        <i data-lucide="users"></i>
+                                    </div>
+                                    <div class="sm-table-wrapper">
+                                        <table class="sm-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Colaborador</th>
+                                                    <th class="text-center">Casos</th>
+                                                    <th class="text-right">Horas Consumidas</th>
+                                                    <th class="text-right">% del Consumo</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="s-collab-tbody">
+                                                <!-- Dynamic collaborator rows -->
+                                            </tbody>
+                                            <tfoot>
+                                                <tr class="sm-total-row">
+                                                    <td><strong>TOTAL EQUIPO</strong></td>
+                                                    <td class="text-center"><strong id="s-collab-total-cases">11</strong></td>
+                                                    <td class="text-right"><strong id="s-collab-total-hours">8.50 h</strong></td>
+                                                    <td class="text-right"><strong>100.00%</strong></td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Horizontal Bar Chart: Horas por Colaborador -->
+                                <div class="sm-panel">
+                                    <div class="sm-panel-banner banner-gray">
+                                        <span>HORAS INVERTIDAS POR COLABORADOR</span>
+                                        <i data-lucide="bar-chart-2"></i>
+                                    </div>
+                                    <div class="sm-chart-wrapper-bars">
+                                        <canvas id="s-collab-barchart"></canvas>
+                                    </div>
+                                </div>
+
+                                <!-- Fórmulas Utilizadas Card -->
+                                <div class="sm-panel sm-formulas-panel">
+                                    <div class="sm-formulas-content">
+                                        <div class="sm-formula-icon">
+                                            <i data-lucide="file-text"></i>
+                                        </div>
+                                        <div class="sm-formula-text">
+                                            <h4 class="sm-formula-title">FÓRMULAS UTILIZADAS</h4>
+                                            <ul class="sm-formula-list">
+                                                <li><strong>Horas Disponibles Restantes</strong> = Horas Totales Disponibles − Horas Utilizadas</li>
+                                                <li><strong>% de Utilización</strong> = (Horas Utilizadas ÷ Horas Totales Disponibles) × 100</li>
+                                                <li><strong>% del Consumo por Colaborador</strong> = (Horas Colaborador ÷ Total Horas Utilizadas) × 100</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            <!-- ================= COLUMN 3: DISTRIBUCIÓN & ESTADOS ================= -->
+                            <div class="sm-col sm-col-distributions">
+                                
+                                <!-- Donut Chart Distribución de Horas -->
+                                <div class="sm-panel">
+                                    <div class="sm-panel-banner banner-navy">
+                                        <span>DISTRIBUCIÓN DE HORAS</span>
+                                        <i data-lucide="pie-chart"></i>
+                                    </div>
+                                    <div class="sm-donut-box">
+                                        <div class="sm-donut-canvas-container">
+                                            <canvas id="s-donut-chart"></canvas>
+                                            <div class="sm-donut-center">
+                                                <span class="center-val" id="s-donut-center-hours">120.00</span>
+                                                <span class="center-sub">Horas Totales</span>
+                                            </div>
+                                        </div>
+                                        <div class="sm-donut-legend" id="s-donut-legend">
+                                            <div class="donut-legend-item">
+                                                <span class="legend-color-box bg-green"></span>
+                                                <div class="legend-text">
+                                                    <span class="legend-lbl">Horas Utilizadas</span>
+                                                    <strong id="s-leg-used">8.50 h (7.08%)</strong>
+                                                </div>
+                                            </div>
+                                            <div class="donut-legend-item">
+                                                <span class="legend-color-box bg-amber"></span>
+                                                <div class="legend-text">
+                                                    <span class="legend-lbl">Horas Restantes</span>
+                                                    <strong id="s-leg-rem">111.50 h (92.92%)</strong>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Distribución de Casos por Tipo -->
+                                <div class="sm-panel">
+                                    <div class="sm-panel-banner banner-navy">
+                                        <span>DISTRIBUCIÓN DE CASOS POR TIPO</span>
+                                        <i data-lucide="tag"></i>
+                                    </div>
+                                    <div class="sm-table-wrapper">
+                                        <table class="sm-type-table">
+                                            <tbody id="s-type-tbody">
+                                                <!-- Dynamic type rows -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Estado de los Tickets (Horizontal Progress Bars) -->
+                                <div class="sm-panel">
+                                    <div class="sm-panel-banner banner-navy">
+                                        <span>ESTADO DE LOS TICKETS</span>
+                                        <i data-lucide="check-circle"></i>
+                                    </div>
+                                    <div class="sm-stages-box" id="s-stages-container">
+                                        <!-- Dynamic stage progress bars -->
+                                    </div>
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                        <!-- Master Slide Footer -->
+                        <footer class="slide-master-footer">
+                            <span id="s-footer-source">Fuente: Odoo Helpdesk · ESMT Consulting · Informe Oficial Confidencial</span>
+                            <span>Soporte Técnico de IT · Documento oficial de reporte de atención y horas</span>
+                        </footer>
+
+                    </section>
+
                 </div>
 
             </main>

@@ -24,6 +24,8 @@ app.config.update(
 
 ODOO_URL = os.environ.get("ODOO_URL", "https://esmtcx.odoo.com").rstrip("/")
 ODOO_DB = os.environ.get("ODOO_DB", "esmtcx")
+ODOO_USER = os.environ.get("ODOO_USER", "")
+ODOO_PASSWORD = os.environ.get("ODOO_PASSWORD", "")
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "integrations_config.json")
 
@@ -241,6 +243,33 @@ def auth_status():
             "db": ODOO_DB,
             "url": ODOO_URL
         })
+    
+    # Auto-login using environment credentials if present
+    if ODOO_USER and ODOO_PASSWORD:
+        try:
+            uid, models = get_odoo_connection(ODOO_USER, ODOO_PASSWORD)
+            if uid:
+                sid = secrets.token_urlsafe(32)
+                session.permanent = True
+                session["sid"] = sid
+                SERVER_SESSIONS[sid] = {
+                    "uid": uid,
+                    "user": ODOO_USER,
+                    "password": ODOO_PASSWORD,
+                    "name": "David I. Reyes S.",
+                    "expires": datetime.utcnow() + timedelta(days=7)
+                }
+                return jsonify({
+                    "authenticated": True,
+                    "user": ODOO_USER,
+                    "uid": uid,
+                    "name": "David I. Reyes S.",
+                    "db": ODOO_DB,
+                    "url": ODOO_URL
+                })
+        except Exception as e:
+            print(f"Auto-auth error: {e}")
+
     return jsonify({"authenticated": False})
 
 
@@ -1260,6 +1289,440 @@ Responde ÚNICAMENTE con el párrafo del resumen en español neutro sin introduc
         )
         return jsonify({"success": True, "summary": summary.strip()})
     except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+
+
+
+def get_auth_connection():
+    """Returns (uid, password, models, user_name) from session or fallback to env credentials."""
+    sess_data = get_active_server_session()
+    if sess_data:
+        uid = sess_data["uid"]
+        pwd = sess_data["password"]
+        models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object", allow_none=True)
+        return uid, pwd, models, sess_data.get("name", "Usuario")
+    
+    # Fallback to env
+    env_user = os.environ.get("ODOO_USER")
+    env_pwd = os.environ.get("ODOO_PASSWORD")
+    if env_user and env_pwd:
+        uid, models = get_odoo_connection(env_user, env_pwd)
+        if uid:
+            return uid, env_pwd, models, env_user
+    return None, None, None, None
+
+
+@app.route("/api/executive/filters", methods=["GET"])
+def get_executive_filters():
+    uid, pwd, models, _ = get_auth_connection()
+    if not uid:
+        return jsonify({"error": "No autorizado"}), 401
+
+    try:
+        # 1. Active Helpdesk Teams
+        teams = models.execute_kw(
+            ODOO_DB, uid, pwd,
+            "helpdesk.team", "search_read",
+            [[["active", "=", True]]],
+            {"fields": ["id", "name"], "order": "name asc"}
+        )
+        
+        # 2. Partners that have tickets
+        partners = []
+        try:
+            partner_groups = models.execute_kw(
+                ODOO_DB, uid, pwd,
+                "helpdesk.ticket", "read_group",
+                [[["partner_id", "!=", False]]],
+                ["partner_id"],
+                ["partner_id"],
+                {"limit": 100, "orderby": "partner_id_count desc"}
+            )
+            seen_ids = set()
+            for g in partner_groups:
+                p_info = g.get("partner_id")
+                if p_info and p_info[0] not in seen_ids:
+                    seen_ids.add(p_info[0])
+                    partners.append({
+                        "id": p_info[0],
+                        "name": p_info[1],
+                        "tickets_count": g.get("partner_id_count", 0)
+                    })
+            partners.sort(key=lambda x: x["name"].lower())
+        except Exception:
+            raw_partners = models.execute_kw(
+                ODOO_DB, uid, pwd,
+                "res.partner", "search_read",
+                [[["customer_rank", ">", 0]]],
+                {"fields": ["id", "name"], "limit": 80, "order": "name asc"}
+            )
+            partners = [{"id": p["id"], "name": p["name"], "tickets_count": 0} for p in raw_partners]
+
+        return jsonify({
+            "success": True,
+            "teams": teams,
+            "partners": partners
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/executive/data", methods=["GET"])
+def get_executive_report_data():
+    uid, pwd, models, _ = get_auth_connection()
+    if not uid:
+        return jsonify({"error": "No autorizado"}), 401
+
+    try:
+        filter_type = request.args.get("filter_type", "team").lower()
+        filter_id = int(request.args.get("filter_id", 0))
+        start_date = request.args.get("start_date", "").strip()
+        end_date = request.args.get("end_date", "").strip()
+        contract_hours = float(request.args.get("contract_hours", 1200.0) or 1200.0)
+
+        now = datetime.now()
+        if not start_date:
+            start_date = f"{now.year:04d}-{now.month:02d}-01"
+        if not end_date:
+            end_date = now.strftime("%Y-%m-%d")
+
+        start_dt_str = f"{start_date} 00:00:00"
+        end_dt_str = f"{end_date} 23:59:59"
+
+        # Resolve entity name
+        entity_name = "Cliente / Helpdesk"
+        if filter_type == "partner":
+            partner_res = models.execute_kw(
+                ODOO_DB, uid, pwd,
+                "res.partner", "read",
+                [[filter_id]],
+                {"fields": ["name"]}
+            )
+            if partner_res:
+                entity_name = partner_res[0].get("name", "Cliente")
+            domain_filter = ["|", ("partner_id", "=", filter_id), ("commercial_partner_id", "=", filter_id)]
+        else:
+            team_res = models.execute_kw(
+                ODOO_DB, uid, pwd,
+                "helpdesk.team", "read",
+                [[filter_id]],
+                {"fields": ["name"]}
+            )
+            if team_res:
+                entity_name = team_res[0].get("name", "Equipo Helpdesk")
+            domain_filter = [("team_id", "=", filter_id)]
+
+        domain = domain_filter + [
+            ("create_date", ">=", start_dt_str),
+            ("create_date", "<=", end_dt_str)
+        ]
+
+        fields = [
+            "id", "name", "stage_id", "priority", "ticket_type_id",
+            "create_date", "close_date", "write_date", "total_hours_spent",
+            "timesheet_ids", "user_id", "partner_id", "team_id", "description"
+        ]
+
+        tickets = models.execute_kw(
+            ODOO_DB, uid, pwd,
+            "helpdesk.ticket", "search_read",
+            [domain],
+            {"fields": fields, "order": "id asc"}
+        )
+
+        # Collect timesheet details
+        all_ts_ids = []
+        for t in tickets:
+            all_ts_ids.extend(t.get("timesheet_ids") or [])
+
+        timesheets_by_ticket = {}
+        collaborator_hours = {}
+        collaborator_tickets = {}
+
+        if all_ts_ids:
+            try:
+                timesheet_records = models.execute_kw(
+                    ODOO_DB, uid, pwd,
+                    "account.analytic.line", "read",
+                    [all_ts_ids],
+                    {"fields": ["id", "user_id", "employee_id", "unit_amount", "name", "date", "helpdesk_ticket_id"]}
+                )
+                for ts in timesheet_records:
+                    t_info = ts.get("helpdesk_ticket_id")
+                    t_id = t_info[0] if t_info else 0
+                    if t_id not in timesheets_by_ticket:
+                        timesheets_by_ticket[t_id] = []
+                    timesheets_by_ticket[t_id].append(ts)
+
+                    u_info = ts.get("user_id") or ts.get("employee_id")
+                    u_name = u_info[1] if u_info else "Sin Asignar"
+                    hrs = float(ts.get("unit_amount") or 0.0)
+
+                    collaborator_hours[u_name] = collaborator_hours.get(u_name, 0.0) + hrs
+                    if u_name not in collaborator_tickets:
+                        collaborator_tickets[u_name] = set()
+                    if t_id:
+                        collaborator_tickets[u_name].add(t_id)
+            except Exception as ts_err:
+                print(f"Error reading timesheets: {ts_err}")
+
+        # If no timesheets found, fallback to ticket.user_id and ticket.total_hours_spent
+        if not collaborator_hours:
+            for t in tickets:
+                u_info = t.get("user_id")
+                u_name = u_info[1] if u_info else "Sin Asignar"
+                hrs = float(t.get("total_hours_spent") or 0.0)
+                collaborator_hours[u_name] = collaborator_hours.get(u_name, 0.0) + hrs
+                if u_name not in collaborator_tickets:
+                    collaborator_tickets[u_name] = set()
+                collaborator_tickets[u_name].add(t["id"])
+
+        # Type translation
+        TYPE_TRANSLATIONS = {
+            "request": "Requerimientos",
+            "incident": "Incidente",
+            "question": "Preguntas",
+            "change": "Cambio",
+            "problem": "Problema",
+            "support": "Soporte"
+        }
+
+        type_counts = {}
+        total_days_sum = 0
+        max_days = 0
+        longest_ticket = None
+        closed_count = 0
+
+        stage_counts = {
+            "Closed": 0,
+            "Waiting Customer": 0,
+            "Work in Progress": 0,
+            "Solved": 0,
+            "New": 0
+        }
+
+        formatted_tickets = []
+        total_hours_spent_calc = 0.0
+
+        for t in tickets:
+            t_id = t["id"]
+            type_data = t.get("ticket_type_id")
+            raw_type = type_data[1] if type_data else "Requerimientos"
+            type_name = TYPE_TRANSLATIONS.get(raw_type.lower(), raw_type)
+            type_counts[type_name] = type_counts.get(type_name, 0) + 1
+
+            stage_data = t.get("stage_id")
+            stage_name = stage_data[1] if stage_data else "Closed"
+            stage_lower = stage_name.lower()
+
+            # Categorize stage
+            if "wait" in stage_lower or "espera" in stage_lower or "customer" in stage_lower:
+                stage_category = "Waiting Customer"
+                stage_counts["Waiting Customer"] += 1
+            elif "progress" in stage_lower or "progreso" in stage_lower or "work" in stage_lower or "wip" in stage_lower:
+                stage_category = "Work in Progress"
+                stage_counts["Work in Progress"] += 1
+            elif "solved" in stage_lower or "resuelto" in stage_lower:
+                stage_category = "Solved"
+                stage_counts["Solved"] += 1
+            elif "new" in stage_lower or "nuevo" in stage_lower:
+                stage_category = "New"
+                stage_counts["New"] += 1
+            else:
+                stage_category = "Closed"
+                stage_counts["Closed"] += 1
+
+            if stage_category in ("Closed", "Solved"):
+                closed_count += 1
+
+            # Resolution days
+            c_date_str = t.get("create_date") or ""
+            end_date_str = t.get("close_date") or t.get("write_date") or c_date_str
+            days_spent = 1
+            if c_date_str and end_date_str:
+                try:
+                    c_dt = datetime.strptime(c_date_str, "%Y-%m-%d %H:%M:%S")
+                    e_dt = datetime.strptime(end_date_str, "%Y-%m-%d %H:%M:%S")
+                    days_spent = max(1, round((e_dt - c_dt).total_seconds() / 86400))
+                except Exception:
+                    days_spent = 1
+
+            total_days_sum += days_spent
+            if days_spent > max_days:
+                max_days = days_spent
+                longest_ticket = {
+                    "id": t_id,
+                    "name": t.get("name") or "(Sin Asunto)",
+                    "days": days_spent
+                }
+
+            # Hours spent on this ticket
+            ts_list = timesheets_by_ticket.get(t_id, [])
+            if ts_list:
+                t_hours = sum(float(x.get("unit_amount") or 0.0) for x in ts_list)
+            else:
+                t_hours = float(t.get("total_hours_spent") or 0.0)
+            total_hours_spent_calc += t_hours
+
+            # Primary collaborator for this ticket
+            collab_str = "Sin asignar"
+            if ts_list:
+                collab_names = list({(x.get("user_id") or x.get("employee_id") or [0, ""])[1] for x in ts_list if (x.get("user_id") or x.get("employee_id"))})
+                collab_str = ", ".join(filter(None, collab_names)) or "Equipo"
+            elif t.get("user_id"):
+                collab_str = t["user_id"][1]
+
+            partner_data = t.get("partner_id")
+            contact_str = partner_data[1] if partner_data else "Cliente"
+
+            odoo_url = f"{ODOO_URL}/web#id={t_id}&cids=1&menu_id=352&action=475&model=helpdesk.ticket&view_type=form"
+
+            formatted_tickets.append({
+                "id": t_id,
+                "name": t.get("name") or "(Sin Asunto)",
+                "type": type_name,
+                "stage": stage_name,
+                "stage_category": stage_category,
+                "contact": contact_str,
+                "collaborator": collab_str,
+                "create_date": c_date_str,
+                "end_date": end_date_str,
+                "days_spent": days_spent,
+                "hours_spent": round(t_hours, 2),
+                "odoo_url": odoo_url
+            })
+
+        total_cases = len(tickets)
+        total_hours_spent = round(total_hours_spent_calc, 2)
+        total_hours_remaining = round(max(0.0, contract_hours - total_hours_spent), 2)
+        utilization_pct = round((total_hours_spent / contract_hours * 100), 2) if contract_hours > 0 else 0.0
+        availability_pct = round((total_hours_remaining / contract_hours * 100), 2) if contract_hours > 0 else 0.0
+        closed_pct = round((closed_count / total_cases * 100), 1) if total_cases > 0 else 0.0
+        avg_days = round(total_days_sum / total_cases) if total_cases > 0 else 0
+
+        # Collaborator details list (No quotas assigned to technicians, only consumed hours and % of effort)
+        collab_rows = []
+        for name, used_h in sorted(collaborator_hours.items(), key=lambda x: x[1], reverse=True):
+            pct_effort = round((used_h / total_hours_spent * 100), 2) if total_hours_spent > 0 else 0.0
+            t_count = len(collaborator_tickets.get(name, []))
+            collab_rows.append({
+                "name": name,
+                "hours_used": round(used_h, 2),
+                "pct_of_total_used": pct_effort,
+                "tickets_count": t_count
+            })
+
+        # Type distribution formatted
+        type_dist = []
+        for t_name in ["Requerimientos", "Incidente", "Cambio", "Problema", "Preguntas"]:
+            cnt = type_counts.get(t_name, 0)
+            if cnt > 0 or t_name in ["Requerimientos", "Incidente", "Cambio"]:
+                pct = round((cnt / total_cases * 100), 1) if total_cases > 0 else 0.0
+                type_dist.append({"type": t_name, "count": cnt, "pct": pct})
+
+        # Stage distribution formatted
+        stage_dist = [
+            {"stage": "Closed", "label": "Closed", "count": stage_counts["Closed"], "pct": round(stage_counts["Closed"]/total_cases*100, 1) if total_cases else 0, "color": "#14b8a6"},
+            {"stage": "Waiting Customer", "label": "Waiting Customer", "count": stage_counts["Waiting Customer"], "pct": round(stage_counts["Waiting Customer"]/total_cases*100, 1) if total_cases else 0, "color": "#f59e0b"},
+            {"stage": "Work in Progress", "label": "Work in Progress / New / Solved", "count": stage_counts["Work in Progress"] + stage_counts["New"] + stage_counts["Solved"], "pct": round((stage_counts["Work in Progress"] + stage_counts["New"] + stage_counts["Solved"])/total_cases*100, 1) if total_cases else 0, "color": "#3b82f6"}
+        ]
+
+        # Monthly History (Image 2 replica: "CASOS MES A MES")
+        monthly_history = []
+        try:
+            ref_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            year_start = f"{ref_dt.year:04d}-01-01 00:00:00"
+            year_end = f"{ref_dt.year:04d}-12-31 23:59:59"
+            h_domain = domain_filter + [
+                ("create_date", ">=", year_start),
+                ("create_date", "<=", year_end)
+            ]
+            hist_tickets = models.execute_kw(
+                ODOO_DB, uid, pwd,
+                "helpdesk.ticket", "search_read",
+                [h_domain],
+                {"fields": ["id", "create_date", "ticket_type_id"]}
+            )
+            by_month = {}
+            for ht in hist_tickets:
+                c_d = ht.get("create_date")
+                if c_d:
+                    m_int = int(c_d[5:7])
+                    tt = (ht.get("ticket_type_id") or [0, "Requerimiento"])[1].lower()
+                    cat = "Incidente" if "inciden" in tt else ("Cambio" if "cambio" in tt or "change" in tt else "Requerimiento")
+                    if m_int not in by_month:
+                        by_month[m_int] = {"Incidente": 0, "Requerimiento": 0, "Cambio": 0, "Total": 0}
+                    by_month[m_int][cat] += 1
+                    by_month[m_int]["Total"] += 1
+
+            for m_idx in sorted(by_month.keys()):
+                m_label = MONTH_NAMES_ES[m_idx] if 1 <= m_idx <= 12 else f"Mes {m_idx}"
+                m_data = by_month[m_idx]
+                monthly_history.append({
+                    "month": m_label,
+                    "month_num": m_idx,
+                    "incidents": m_data["Incidente"],
+                    "requests": m_data["Requerimiento"],
+                    "changes": m_data["Cambio"],
+                    "total": m_data["Total"]
+                })
+        except Exception as hist_err:
+            print(f"Error building monthly history: {hist_err}")
+
+        # Human period label
+        try:
+            p_s = datetime.strptime(start_date, "%Y-%m-%d")
+            p_e = datetime.strptime(end_date, "%Y-%m-%d")
+            if p_s.month == p_e.month and p_s.year == p_e.year:
+                period_label = f"{p_s.day:02d} al {p_e.day:02d} de {MONTH_NAMES_ES[p_s.month].lower()} de {p_s.year}"
+                period_month = f"{MONTH_NAMES_ES[p_s.month]} {p_s.year}"
+            else:
+                period_label = f"{p_s.strftime('%d/%m/%Y')} al {p_e.strftime('%d/%m/%Y')}"
+                period_month = f"{MONTH_NAMES_ES[p_s.month]} - {MONTH_NAMES_ES[p_e.month]} {p_e.year}"
+        except Exception:
+            period_label = f"{start_date} al {end_date}"
+            period_month = start_date
+
+        return jsonify({
+            "success": True,
+            "entity_name": entity_name,
+            "filter_type": filter_type,
+            "filter_id": filter_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "period_label": period_label,
+            "period_month": period_month,
+            "kpis": {
+                "total_cases": total_cases,
+                "closed_cases": closed_count,
+                "closed_pct": closed_pct,
+                "total_hours_available": contract_hours,
+                "total_hours_used": total_hours_spent,
+                "total_hours_remaining": total_hours_remaining,
+                "utilization_pct": utilization_pct,
+                "availability_pct": availability_pct,
+                "avg_resolution_days": avg_days,
+                "max_resolution_days": max_days,
+                "longest_ticket": longest_ticket or {"id": 0, "name": "-", "days": 0}
+            },
+            "collaborators": collab_rows,
+            "collaborator_totals": {
+                "total_available": contract_hours,
+                "total_used": total_hours_spent,
+                "total_remaining": total_hours_remaining,
+                "overall_utilization_pct": utilization_pct
+            },
+            "type_distribution": type_dist,
+            "stage_distribution": stage_dist,
+            "monthly_history": monthly_history,
+            "tickets": formatted_tickets
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 

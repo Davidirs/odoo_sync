@@ -2081,3 +2081,656 @@ body {
     }
 }
 
+/* =========================================================
+   EXECUTIVE MASTER SLIDE SYSTEM (FULL WIDESCREEN 16:9)
+   UNIFIED EXECUTIVE REPORT: TICKETS, COLLABORATORS,
+   DISTRIBUTIONS, REAL-TIME HOURS FORMULAS
+   ========================================================= */
+
+/* Make view-executive cover 100% full width, eliminating side gaps */
+#view-executive.app-content {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 16px 28px 36px 28px !important;
+    margin: 0 !important;
+}
+
+/* Filter Toolbar (Full Width) */
+.exec-filter-panel {
+    padding: 18px 22px;
+    margin-bottom: 20px;
+    border-radius: 12px;
+    width: 100%;
+}
+
+.exec-filter-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-bottom: 14px;
+}
+
+@media (min-width: 860px) {
+    .exec-filter-grid {
+        grid-template-columns: 2fr 1.3fr 1fr;
+        align-items: end;
+    }
+}
+
+.form-filter-lbl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.custom-date-input, .custom-num-input {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.custom-date-input:focus, .custom-num-input:focus {
+    border-color: var(--border-focus);
+}
+
+.input-with-suffix {
+    display: flex;
+    align-items: center;
+    position: relative;
+}
+
+.input-with-suffix .custom-num-input {
+    width: 100%;
+    padding-right: 42px;
+}
+
+.input-suffix {
+    position: absolute;
+    right: 12px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.exec-actions-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.exec-presets-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.preset-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+}
+
+.btn-chip {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-chip:hover {
+    color: var(--accent-blue);
+    border-color: var(--accent-blue);
+}
+
+.btn-chip.active {
+    background: #0284c7;
+    color: #ffffff;
+    border-color: #0284c7;
+}
+
+.exec-btn-cluster {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Master Slides Container */
+.slides-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+/* Base Master Slide Card (Full Widescreen Edge-to-Edge) */
+.slide-master-theme {
+    width: 100% !important;
+    max-width: 100% !important;
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+    border: 1px solid #cbd5e1;
+    overflow: hidden;
+    margin: 0 auto;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Navy Corporate Header */
+.slide-master-header {
+    background: #04182b;
+    color: #ffffff;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.sm-header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.sm-header-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #38bdf8;
+}
+
+.sm-main-title {
+    font-size: 1.375rem;
+    font-weight: 800;
+    margin: 0;
+    letter-spacing: -0.25px;
+    color: #ffffff;
+}
+
+.sm-main-period {
+    font-size: 0.8125rem;
+    color: #94a3b8;
+    margin: 3px 0 0 0;
+    font-weight: 500;
+}
+
+.sm-header-right {
+    text-align: right;
+}
+
+.sm-brand-tag {
+    font-size: 0.8125rem;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+.sm-brand-sub {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* Master Top 7 KPI Ribbon */
+.slide-master-kpi-ribbon {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    background: #ffffff;
+    border-bottom: 2px solid #e2e8f0;
+    padding: 12px 20px;
+    gap: 10px;
+}
+
+@media (min-width: 1200px) {
+    .slide-master-kpi-ribbon {
+        grid-template-columns: repeat(7, 1fr);
+    }
+}
+
+.sm-kpi-card {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 14px;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.sm-kpi-card.card-blue { background: #eef7ff; border: 1px solid #b9ddff; }
+.sm-kpi-card.card-green { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.sm-kpi-card.card-amber { background: #fffbeb; border: 1px solid #fde68a; }
+.sm-kpi-card.card-purple { background: #faf5ff; border: 1px solid #e9d5ff; }
+.sm-kpi-card.card-cyan { background: #ecfeff; border: 1px solid #a5f3fc; }
+.sm-kpi-card.card-teal { background: #f0fdfa; border: 1px solid #99f6e4; }
+.sm-kpi-card.card-red { background: #fff1f2; border: 1px solid #fecdd3; }
+
+.sm-kpi-lbl {
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+}
+
+.sm-kpi-val {
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.1;
+    font-feature-settings: "tnum";
+}
+
+.sm-kpi-sub {
+    font-size: 0.6875rem;
+    color: #64748b;
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
+/* Master Slide 3-Column Grid */
+.slide-master-body-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px 20px;
+    background: #f8fafc;
+}
+
+@media (min-width: 1080px) {
+    .slide-master-body-grid {
+        grid-template-columns: 36% 36% 28%;
+    }
+}
+
+.sm-panel {
+    background: #ffffff;
+    border: 1px solid #dbe2ea;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+
+.sm-panel-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 12px;
+    font-size: 0.775rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.banner-navy { background: #003366; color: #ffffff; }
+.banner-blue { background: #0284c7; color: #ffffff; }
+.banner-gray { background: #334155; color: #ffffff; }
+
+/* Tickets List (Column 1) */
+.sm-ticket-list-wrapper {
+    max-height: 480px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.sm-ticket-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    border-left: 4px solid #ea580c;
+    font-size: 0.75rem;
+    transition: background 0.15s ease;
+}
+
+.sm-ticket-row:hover {
+    background: #f1f5f9;
+}
+
+.sm-ticket-id {
+    font-weight: 700;
+    color: #0284c7;
+    flex-shrink: 0;
+    width: 54px;
+}
+
+.sm-ticket-name {
+    flex: 1;
+    color: #334155;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sm-ticket-badge {
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: capitalize;
+    flex-shrink: 0;
+}
+
+.sm-badge-closed { background: #d1fae5; color: #065f46; }
+.sm-badge-waiting { background: #fee2e2; color: #991b1b; }
+.sm-badge-wip { background: #fef3c7; color: #92400e; }
+
+.sm-ticket-hours {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #0f172a;
+    width: 44px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.sm-ticket-days {
+    font-size: 0.675rem;
+    font-weight: 600;
+    color: #64748b;
+    width: 28px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.sm-longest-case-pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #fff7ed;
+    border-top: 1px solid #ffedd5;
+}
+
+.longest-case-icon {
+    color: #ea580c;
+    display: flex;
+    align-items: center;
+}
+
+.longest-case-text {
+    font-size: 0.725rem;
+    color: #9a3412;
+}
+
+.longest-case-text strong {
+    font-weight: 700;
+    margin-left: 4px;
+}
+
+/* Collaborator Table (Column 2) */
+.sm-table-wrapper {
+    overflow-x: auto;
+}
+
+.sm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.775rem;
+}
+
+.sm-table th {
+    background: #f1f5f9;
+    color: #1e293b;
+    font-weight: 700;
+    padding: 8px 10px;
+    border-bottom: 2px solid #cbd5e1;
+    border-right: 1px solid #e2e8f0;
+    font-size: 0.725rem;
+}
+
+.sm-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    border-right: 1px solid #f1f5f9;
+    color: #334155;
+    font-feature-settings: "tnum";
+}
+
+.sm-table tbody tr:nth-child(even) {
+    background: #f8fafc;
+}
+
+.sm-total-row {
+    background: #e2e8f0 !important;
+    color: #0f172a !important;
+    border-top: 2px solid #003366;
+}
+
+.sm-total-row td {
+    padding: 9px 10px;
+    font-size: 0.8125rem;
+}
+
+/* Collaborator Horizontal Bar Chart */
+.sm-chart-wrapper-bars {
+    padding: 10px 14px;
+    height: 155px;
+}
+
+/* Formulas Card */
+.sm-formulas-panel {
+    border: 1px solid #c7d2fe;
+    background: #f8faff;
+}
+
+.sm-formulas-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+}
+
+.sm-formula-icon {
+    width: 36px;
+    height: 36px;
+    background: #003366;
+    color: #ffffff;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.sm-formula-title {
+    font-size: 0.775rem;
+    font-weight: 800;
+    color: #003366;
+    margin: 0 0 6px 0;
+    letter-spacing: 0.5px;
+}
+
+.sm-formula-list {
+    margin: 0;
+    padding-left: 16px;
+    font-size: 0.725rem;
+    line-height: 1.5;
+    color: #334155;
+}
+
+/* Column 3: Donut & Type Distributions */
+.sm-donut-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 12px 14px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.sm-donut-canvas-container {
+    position: relative;
+    width: 140px;
+    height: 140px;
+}
+
+.sm-donut-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    pointer-events: none;
+}
+
+.sm-donut-center .center-val {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0b2545;
+}
+
+.sm-donut-center .center-sub {
+    font-size: 0.65rem;
+    color: #64748b;
+    font-weight: 600;
+}
+
+.sm-donut-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sm-type-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.725rem;
+}
+
+.sm-type-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.sm-stages-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+}
+
+/* Master Slide Footer */
+.slide-master-footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 20px;
+    background: #ffffff;
+    border-top: 1px solid #e2e8f0;
+    font-size: 0.675rem;
+    color: #94a3b8;
+}
+
+/* Capture & Presentation Mode (16:9 Focus) */
+body.slide-capture-mode {
+    background: #04182b !important;
+    overflow-x: hidden;
+}
+
+body.slide-capture-mode .app-header,
+body.slide-capture-mode .exec-filter-panel,
+body.slide-capture-mode .app-footer {
+    display: none !important;
+}
+
+body.slide-capture-mode #view-executive.app-content {
+    padding: 10px 14px !important;
+    max-width: 100% !important;
+}
+
+body.slide-capture-mode .slide-master-theme {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+/* Floating Exit Button in Capture Mode */
+.btn-exit-capture {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    background: #0284c7;
+    color: #ffffff;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 30px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Print Styles */
+@media print {
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+    }
+
+    .app-header, .exec-filter-panel, .app-footer, .btn-exit-capture {
+        display: none !important;
+    }
+
+    .app-content {
+        padding: 0 !important;
+    }
+
+    .slide-master-theme {
+        box-shadow: none !important;
+        border: none !important;
+        margin: 0 !important;
+        width: 100% !important;
+    }
+
+    .slide-master-header {
+        background: #04182b !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .banner-navy {
+        background: #003366 !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}

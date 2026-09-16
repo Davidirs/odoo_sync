@@ -54,8 +54,10 @@ document.addEventListener("DOMContentLoaded", () => {
         // Navigation Switcher
         tabNavMonitor: document.getElementById("tab-nav-monitor"),
         tabNavReports: document.getElementById("tab-nav-reports"),
+        tabNavExecutive: document.getElementById("tab-nav-executive"),
         viewMonitor: document.getElementById("view-monitor"),
         viewReports: document.getElementById("view-reports"),
+        viewExecutive: document.getElementById("view-executive"),
 
         // Dashboard Header
         userDisplayName: document.getElementById("user-display-name"),
@@ -198,17 +200,30 @@ document.addEventListener("DOMContentLoaded", () => {
         if (viewName === "monitor") {
             elements.tabNavMonitor.classList.add("active");
             elements.tabNavReports.classList.remove("active");
+            if (elements.tabNavExecutive) elements.tabNavExecutive.classList.remove("active");
             elements.viewMonitor.classList.remove("hidden");
             elements.viewReports.classList.add("hidden");
+            if (elements.viewExecutive) elements.viewExecutive.classList.add("hidden");
         } else if (viewName === "reports") {
             elements.tabNavReports.classList.add("active");
             elements.tabNavMonitor.classList.remove("active");
+            if (elements.tabNavExecutive) elements.tabNavExecutive.classList.remove("active");
             elements.viewReports.classList.remove("hidden");
             elements.viewMonitor.classList.add("hidden");
+            if (elements.viewExecutive) elements.viewExecutive.classList.add("hidden");
             
             if (state.reportClients.length === 0) {
                 fetchReportClients();
             }
+        } else if (viewName === "executive") {
+            if (elements.tabNavExecutive) elements.tabNavExecutive.classList.add("active");
+            elements.tabNavMonitor.classList.remove("active");
+            elements.tabNavReports.classList.remove("active");
+            if (elements.viewExecutive) elements.viewExecutive.classList.remove("hidden");
+            elements.viewMonitor.classList.add("hidden");
+            elements.viewReports.classList.add("hidden");
+
+            initExecutiveReport();
         }
         updateIcons();
     }
@@ -216,6 +231,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (elements.tabNavMonitor && elements.tabNavReports) {
         elements.tabNavMonitor.addEventListener("click", () => switchView("monitor"));
         elements.tabNavReports.addEventListener("click", () => switchView("reports"));
+    }
+    if (elements.tabNavExecutive) {
+        elements.tabNavExecutive.addEventListener("click", () => switchView("executive"));
     }
 
     // ==========================================
@@ -1545,6 +1563,575 @@ ${stagesTableText}`;
         return `<p>${escapeHtml(raw).replace(/\n/g, "<br>")}</p>`;
     }
 
+    // =========================================================
+    // EXECUTIVE REPORT & SLIDES SYSTEM (IMAGEN 1 Y 2)
+    // =========================================================
+
+    const execState = {
+        initialized: false,
+        filterType: "team", // "team" or "partner"
+        teams: [],
+        partners: [],
+        currentData: null,
+        activeSlide: "slide1",
+        donutChart: null,
+        collabChart: null
+    };
+
+    function initExecutiveReport() {
+        if (execState.initialized) return;
+        execState.initialized = true;
+
+        setupExecutiveDatePickers();
+        setupExecutiveEventListeners();
+        loadExecutiveFilters();
+    }
+
+    function setupExecutiveDatePickers() {
+        const dStart = document.getElementById("exec-date-start");
+        const dEnd = document.getElementById("exec-date-end");
+        const hInput = document.getElementById("exec-contract-hours");
+
+        // Load saved hours if any
+        const savedHours = localStorage.getItem("odoo_contract_hours");
+        if (savedHours && hInput) {
+            hInput.value = savedHours;
+        }
+
+        // Set default to July 2026 (matching Tecniscan demo) or current month
+        if (dStart && dEnd) {
+            dStart.value = "2026-07-01";
+            dEnd.value = "2026-07-31";
+        }
+
+        // Presets
+        const pJuly = document.getElementById("preset-july-2026");
+        const pThisMonth = document.getElementById("preset-this-month");
+        const pLast30 = document.getElementById("preset-last-30");
+        const pYear = document.getElementById("preset-year-2026");
+
+        function clearPresetActive() {
+            document.querySelectorAll(".exec-presets-chips .btn-chip").forEach(b => b.classList.remove("active"));
+        }
+
+        if (pJuly) {
+            pJuly.addEventListener("click", () => {
+                clearPresetActive();
+                pJuly.classList.add("active");
+                if (dStart && dEnd) {
+                    dStart.value = "2026-07-01";
+                    dEnd.value = "2026-07-31";
+                    fetchExecutiveData();
+                }
+            });
+        }
+
+        if (pThisMonth) {
+            pThisMonth.addEventListener("click", () => {
+                clearPresetActive();
+                pThisMonth.classList.add("active");
+                const now = new Date();
+                const y = now.getFullYear();
+                const m = String(now.getMonth() + 1).padStart(2, "0");
+                const d = String(now.getDate()).padStart(2, "0");
+                if (dStart && dEnd) {
+                    dStart.value = `${y}-${m}-01`;
+                    dEnd.value = `${y}-${m}-${d}`;
+                    fetchExecutiveData();
+                }
+            });
+        }
+
+        if (pLast30) {
+            pLast30.addEventListener("click", () => {
+                clearPresetActive();
+                pLast30.classList.add("active");
+                const now = new Date();
+                const past = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+                const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+                if (dStart && dEnd) {
+                    dStart.value = fmt(past);
+                    dEnd.value = fmt(now);
+                    fetchExecutiveData();
+                }
+            });
+        }
+
+        if (pYear) {
+            pYear.addEventListener("click", () => {
+                clearPresetActive();
+                pYear.classList.add("active");
+                const y = new Date().getFullYear();
+                if (dStart && dEnd) {
+                    dStart.value = `${y}-01-01`;
+                    dEnd.value = `${y}-12-31`;
+                    fetchExecutiveData();
+                }
+            });
+        }
+    }
+
+    function setupExecutiveEventListeners() {
+        const entitySelect = document.getElementById("exec-entity-select");
+        const btnGenerate = document.getElementById("btn-exec-generate");
+        const btnCapture = document.getElementById("btn-exec-capture-mode");
+        const btnPrint = document.getElementById("btn-exec-print");
+        const hInput = document.getElementById("exec-contract-hours");
+
+        // Generate Report Button
+        if (btnGenerate) {
+            btnGenerate.addEventListener("click", () => fetchExecutiveData());
+        }
+
+        // Entity Select Change (Helpdesk Team)
+        if (entitySelect) {
+            entitySelect.addEventListener("change", () => fetchExecutiveData());
+        }
+
+        // Dynamic Contract Hours Input Change (Instant recalculation without network call)
+        if (hInput) {
+            hInput.addEventListener("input", () => {
+                const val = parseFloat(hInput.value) || 0;
+                localStorage.setItem("odoo_contract_hours", val);
+                recalculateExecutiveMetrics(val);
+            });
+        }
+
+        // Capture Mode Toggle (16:9 Presentation View)
+        if (btnCapture) {
+            btnCapture.addEventListener("click", toggleCaptureMode);
+        }
+
+        // Print Report
+        if (btnPrint) {
+            btnPrint.addEventListener("click", () => {
+                setTimeout(() => window.print(), 200);
+            });
+        }
+    }
+
+    function toggleCaptureMode() {
+        const isCapture = document.body.classList.toggle("slide-capture-mode");
+        let exitBtn = document.getElementById("btn-exit-capture-floating");
+
+        if (isCapture) {
+            if (!exitBtn) {
+                exitBtn = document.createElement("button");
+                exitBtn.id = "btn-exit-capture-floating";
+                exitBtn.className = "btn-exit-capture";
+                exitBtn.innerHTML = '<span>Salir de Modo Diapositiva (ESC)</span>';
+                document.body.appendChild(exitBtn);
+                exitBtn.addEventListener("click", toggleCaptureMode);
+            }
+            exitBtn.style.display = "flex";
+
+            const escHandler = (e) => {
+                if (e.key === "Escape") {
+                    document.body.classList.remove("slide-capture-mode");
+                    if (exitBtn) exitBtn.style.display = "none";
+                    window.removeEventListener("keydown", escHandler);
+                }
+            };
+            window.addEventListener("keydown", escHandler);
+            showToast("📷 Modo Diapositiva activado (Presiona ESC para salir)");
+        } else {
+            if (exitBtn) exitBtn.style.display = "none";
+        }
+    }
+
+    async function loadExecutiveFilters() {
+        try {
+            const res = await fetch("/api/executive/filters");
+            const data = await res.json();
+            if (data.success) {
+                execState.teams = data.teams || [];
+                execState.partners = data.partners || [];
+                populateEntityDropdown();
+                
+                // Auto trigger initial load for Tecniscan
+                fetchExecutiveData();
+            }
+        } catch (e) {
+            console.error("Error loading executive filters:", e);
+        }
+    }
+
+    function populateEntityDropdown() {
+        const select = document.getElementById("exec-entity-select");
+        if (!select) return;
+
+        select.innerHTML = "";
+        const list = execState.filterType === "team" ? execState.teams : execState.partners;
+
+        if (list.length === 0) {
+            select.innerHTML = '<option value="">Sin elementos disponibles</option>';
+            return;
+        }
+
+        let defaultSelectedId = null;
+
+        list.forEach(item => {
+            const opt = document.createElement("option");
+            opt.value = item.id;
+            const extra = item.tickets_count ? ` (${item.tickets_count} tickets)` : "";
+            opt.textContent = `${item.name}${extra}`;
+
+            // Priority default: Tecniscan
+            if (item.name.toLowerCase().includes("tecniscan") && !defaultSelectedId) {
+                defaultSelectedId = item.id;
+            }
+            select.appendChild(opt);
+        });
+
+        if (defaultSelectedId) {
+            select.value = defaultSelectedId;
+        } else if (list.length > 0) {
+            select.value = list[0].id;
+        }
+    }
+
+    async function fetchExecutiveData() {
+        const entitySelect = document.getElementById("exec-entity-select");
+        const dStart = document.getElementById("exec-date-start");
+        const dEnd = document.getElementById("exec-date-end");
+        const hInput = document.getElementById("exec-contract-hours");
+        const loadingCard = document.getElementById("exec-loading-state");
+        const slidesContainer = document.getElementById("slides-master-container");
+
+        if (!entitySelect || !entitySelect.value) return;
+
+        const filterId = entitySelect.value;
+        const startDate = dStart ? dStart.value : "";
+        const endDate = dEnd ? dEnd.value : "";
+        const contractHours = hInput ? (parseFloat(hInput.value) || 120.0) : 120.0;
+
+        if (loadingCard) loadingCard.classList.remove("hidden");
+        if (slidesContainer) slidesContainer.style.opacity = "0.4";
+
+        try {
+            const params = new URLSearchParams({
+                filter_type: "team",
+                filter_id: filterId,
+                start_date: startDate,
+                end_date: endDate,
+                contract_hours: contractHours
+            });
+
+            const res = await fetch(`/api/executive/data?${params.toString()}`);
+            const data = await res.json();
+
+            if (data.success) {
+                execState.currentData = data;
+                renderMasterSlide(data);
+            } else {
+                showToast(`Error: ${data.error || "No se pudo cargar el reporte"}`);
+            }
+        } catch (err) {
+            console.error("Error fetching executive report:", err);
+            showToast("Error de conexión al cargar datos del reporte");
+        } finally {
+            if (loadingCard) loadingCard.classList.add("hidden");
+            if (slidesContainer) slidesContainer.style.opacity = "1";
+            updateIcons();
+        }
+    }
+
+    // Dynamic In-Memory Recalculation (When changing Horas Totales Disponibles)
+    function recalculateExecutiveMetrics(newContractHours) {
+        if (!execState.currentData) return;
+        const d = execState.currentData;
+        const k = d.kpis;
+        
+        k.total_hours_available = newContractHours;
+        k.total_hours_remaining = Math.max(0, parseFloat((newContractHours - k.total_hours_used).toFixed(2)));
+        k.utilization_pct = newContractHours > 0 ? parseFloat(((k.total_hours_used / newContractHours) * 100).toFixed(2)) : 0;
+        k.availability_pct = newContractHours > 0 ? parseFloat(((k.total_hours_remaining / newContractHours) * 100).toFixed(2)) : 0;
+
+        // Update Top Ribbon KPI elements
+        const elAvail = document.getElementById("s-kpi-total-avail");
+        const elRem = document.getElementById("s-kpi-total-rem");
+        const elUtil = document.getElementById("s-kpi-total-util");
+        if (elAvail) elAvail.textContent = k.total_hours_available.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (elRem) elRem.textContent = k.total_hours_remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (elUtil) elUtil.textContent = `${k.utilization_pct.toFixed(2)}%`;
+
+        // Update Donut Center & Legend
+        const donutCenter = document.getElementById("s-donut-center-hours");
+        const legUsed = document.getElementById("s-leg-used");
+        const legRem = document.getElementById("s-leg-rem");
+        if (donutCenter) donutCenter.textContent = k.total_hours_available.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (legUsed) legUsed.textContent = `${k.total_hours_used.toFixed(2)} h (${k.utilization_pct.toFixed(2)}%)`;
+        if (legRem) legRem.textContent = `${k.total_hours_remaining.toFixed(2)} h (${k.availability_pct.toFixed(2)}%)`;
+
+        // Update Donut Chart
+        if (execState.donutChart) {
+            execState.donutChart.data.datasets[0].data = [k.total_hours_used, k.total_hours_remaining];
+            execState.donutChart.update();
+        }
+    }
+
+    // =========================================================
+    // RENDER UNIFIED MASTER SLIDE (SINGLE FULL WIDESCREEN SLIDE)
+    // =========================================================
+    function renderMasterSlide(data) {
+        const k = data.kpis;
+
+        // Header Title & Period
+        const sTitle = document.getElementById("s-main-title");
+        const sPeriod = document.getElementById("s-main-period");
+        if (sTitle) sTitle.textContent = `${data.entity_name} — Reporte Ejecutivo de Soporte y Horas`;
+        if (sPeriod) sPeriod.textContent = `Período: ${data.period_label || data.period_month} · Genesys Cloud CX`;
+
+        // Top 7 KPI Ribbon
+        const elAvail = document.getElementById("s-kpi-total-avail");
+        const elUsed = document.getElementById("s-kpi-total-used");
+        const elRem = document.getElementById("s-kpi-total-rem");
+        const elUtil = document.getElementById("s-kpi-total-util");
+        const elCases = document.getElementById("s-kpi-total-cases");
+        const elBreakdown = document.getElementById("s-kpi-types-breakdown");
+        const elClosedRatio = document.getElementById("s-kpi-closed-ratio");
+        const elClosedPct = document.getElementById("s-kpi-closed-pct");
+        const elAvgDays = document.getElementById("s-kpi-avg-days");
+        const elLongestSub = document.getElementById("s-kpi-longest-sub");
+
+        if (elAvail) elAvail.textContent = k.total_hours_available.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (elUsed) elUsed.textContent = k.total_hours_used.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (elRem) elRem.textContent = k.total_hours_remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (elUtil) elUtil.textContent = `${k.utilization_pct.toFixed(2)}%`;
+        if (elCases) elCases.textContent = k.total_cases;
+
+        const reqItem = (data.type_distribution || []).find(x => x.type.toLowerCase().includes("requer")) || { count: 0 };
+        const incItem = (data.type_distribution || []).find(x => x.type.toLowerCase().includes("inciden")) || { count: 0 };
+        if (elBreakdown) elBreakdown.textContent = `${reqItem.count} req · ${incItem.count} incidente`;
+
+        if (elClosedRatio) elClosedRatio.textContent = `${k.closed_cases} / ${k.total_cases}`;
+        if (elClosedPct) elClosedPct.textContent = `${k.closed_pct.toFixed(1)}% resueltos`;
+        if (elAvgDays) elAvgDays.textContent = `${k.avg_resolution_days} días`;
+        if (elLongestSub) {
+            elLongestSub.textContent = k.longest_ticket && k.longest_ticket.days ? `Max: ${k.longest_ticket.days} d` : `0 d`;
+        }
+
+        // ================= COLUMN 1: RESUMEN DE TICKETS =================
+        const ticketBadge = document.getElementById("s-ticket-count-badge");
+        if (ticketBadge) ticketBadge.textContent = k.total_cases;
+
+        const ticketList = document.getElementById("s-ticket-list");
+        if (ticketList) {
+            ticketList.innerHTML = "";
+            if (!data.tickets || data.tickets.length === 0) {
+                ticketList.innerHTML = '<div style="padding: 16px; color: #94a3b8; text-align: center;">No hay tickets registrados en este período</div>';
+            } else {
+                data.tickets.forEach(t => {
+                    const item = document.createElement("div");
+                    item.className = "sm-ticket-item";
+
+                    let badgeClass = "sm-badge-closed";
+                    if (t.stage_category === "Waiting Customer") badgeClass = "sm-badge-waiting";
+                    else if (t.stage_category === "Work in Progress") badgeClass = "sm-badge-wip";
+
+                    const ticketHours = typeof t.unit_amount === "number" ? t.unit_amount.toFixed(1) : "0.0";
+
+                    item.innerHTML = `
+                        <span class="sm-ticket-id">#${t.id}</span>
+                        <span class="sm-ticket-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+                        <span class="sm-badge-pill ${badgeClass}">${escapeHtml(t.stage)}</span>
+                        <span class="sm-ticket-hours">${ticketHours}h</span>
+                        <span class="sm-ticket-days">${t.days_spent} d</span>
+                    `;
+                    ticketList.appendChild(item);
+                });
+            }
+        }
+
+        const longestDesc = document.getElementById("s-longest-case-desc");
+        if (longestDesc) {
+            if (k.longest_ticket && k.longest_ticket.days) {
+                longestDesc.textContent = `#${k.longest_ticket.id} - ${k.longest_ticket.name} (${k.longest_ticket.days} días)`;
+            } else {
+                longestDesc.textContent = "Sin tickets de larga duración";
+            }
+        }
+
+        // ================= COLUMN 2: DETALLE POR COLABORADOR =================
+        // A los colaboradores NO se les asigna cuota de horas, solo consumen según atención
+        const collabTbody = document.getElementById("s-collab-tbody");
+        if (collabTbody) {
+            collabTbody.innerHTML = "";
+            if (!data.collaborators || data.collaborators.length === 0) {
+                collabTbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #94a3b8; padding: 14px;">No se registraron horas por colaborador en este período</td></tr>';
+            } else {
+                data.collaborators.forEach(c => {
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td><strong>${escapeHtml(c.name)}</strong></td>
+                        <td class="text-center">${c.tickets_count || 0}</td>
+                        <td class="text-right"><strong>${c.hours_used.toFixed(2)} h</strong></td>
+                        <td class="text-right" style="color: #0284c7; font-weight: 700;">${c.pct_of_total_used.toFixed(2)}%</td>
+                    `;
+                    collabTbody.appendChild(tr);
+                });
+            }
+        }
+
+        const collabTotCases = document.getElementById("s-collab-total-cases");
+        const collabTotHours = document.getElementById("s-collab-total-hours");
+        if (collabTotCases) collabTotCases.textContent = k.total_cases;
+        if (collabTotHours) collabTotHours.textContent = `${k.total_hours_used.toFixed(2)} h`;
+
+        renderMasterCollabBarChart(data.collaborators);
+
+        // ================= COLUMN 3: DISTRIBUCIÓN & ESTADOS =================
+        const donutCenter = document.getElementById("s-donut-center-hours");
+        const legUsed = document.getElementById("s-leg-used");
+        const legRem = document.getElementById("s-leg-rem");
+
+        if (donutCenter) donutCenter.textContent = k.total_hours_available.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (legUsed) legUsed.textContent = `${k.total_hours_used.toFixed(2)} h (${k.utilization_pct.toFixed(2)}%)`;
+        if (legRem) legRem.textContent = `${k.total_hours_remaining.toFixed(2)} h (${k.availability_pct.toFixed(2)}%)`;
+
+        renderMasterDonutChart(k.total_hours_used, k.total_hours_remaining);
+
+        // Type Distribution Table
+        const typeTbody = document.getElementById("s-type-tbody");
+        if (typeTbody) {
+            typeTbody.innerHTML = "";
+            (data.type_distribution || []).forEach(td => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td>${escapeHtml(td.type)}</td>
+                    <td class="text-center"><strong>${td.count}</strong></td>
+                    <td class="text-right" style="color: #0d9488; font-weight: 700;">${td.pct.toFixed(1)}%</td>
+                `;
+                typeTbody.appendChild(tr);
+            });
+        }
+
+        // Estado de los Tickets (Horizontal Progress Bars)
+        const stagesContainer = document.getElementById("s-stages-container");
+        if (stagesContainer) {
+            stagesContainer.innerHTML = "";
+            (data.stage_distribution || []).forEach(st => {
+                const row = document.createElement("div");
+                row.className = "sm-stage-row";
+                row.innerHTML = `
+                    <div class="sm-stage-label-row">
+                        <span>${escapeHtml(st.label)} &nbsp; <strong>${st.count}</strong></span>
+                        <span>${st.pct.toFixed(1)}%</span>
+                    </div>
+                    <div class="sm-stage-track">
+                        <div class="sm-stage-bar" style="width: ${Math.max(st.pct, st.count > 0 ? 4 : 0)}%; background: ${st.color};"></div>
+                    </div>
+                `;
+                stagesContainer.appendChild(row);
+            });
+        }
+
+        // Footer Source
+        const fSource = document.getElementById("s-footer-source");
+        if (fSource) {
+            fSource.textContent = `Fuente: Odoo Helpdesk · ${data.entity_name} · ESMT Consulting · Informe Oficial Confidencial`;
+        }
+    }
+
+    function renderMasterDonutChart(used, remaining) {
+        const canvas = document.getElementById("s-donut-chart");
+        if (!canvas) return;
+
+        if (execState.donutChart) {
+            execState.donutChart.destroy();
+        }
+
+        const ctx = canvas.getContext("2d");
+        execState.donutChart = new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["Horas Utilizadas", "Horas Disponibles Restantes"],
+                datasets: [{
+                    data: [used, remaining],
+                    backgroundColor: ["#16a34a", "#eab308"],
+                    borderWidth: 2,
+                    borderColor: "#ffffff",
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: "68%",
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const val = context.raw || 0;
+                                const total = used + remaining;
+                                const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+                                return ` ${context.label}: ${val.toFixed(2)} hrs (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderMasterCollabBarChart(collaborators) {
+        const canvas = document.getElementById("s-collab-barchart");
+        if (!canvas) return;
+
+        if (execState.collabChart) {
+            execState.collabChart.destroy();
+        }
+
+        const labels = (collaborators || []).map(c => {
+            const parts = c.name.split(" ");
+            return parts.length > 1 ? `${parts[0]} ${parts[1].charAt(0)}.` : c.name;
+        });
+        const values = (collaborators || []).map(c => c.hours_used);
+
+        const ctx = canvas.getContext("2d");
+        execState.collabChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: labels.length ? labels : ["Sin colaboradores"],
+                datasets: [{
+                    label: "Horas Consumidas",
+                    data: values.length ? values : [0],
+                    backgroundColor: "#0284c7",
+                    borderRadius: 4,
+                    barPercentage: 0.55
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: value => `${value} h`,
+                            font: { size: 10 }
+                        },
+                        grid: { color: "rgba(0,0,0,0.05)" }
+                    },
+                    x: {
+                        ticks: { font: { size: 10, weight: "600" } },
+                        grid: { display: false }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: context => ` Consumo: ${context.raw.toFixed(2)} hrs`
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Start App
     checkAuthStatus();
 });
+
