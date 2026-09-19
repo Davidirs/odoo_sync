@@ -706,8 +706,9 @@
                         <!-- Navy Corporate Header -->
                         <header class="slide-master-header">
                             <div class="sm-header-left">
-                                <div class="sm-header-icon">
-                                    <i data-lucide="headphones"></i>
+                                <div class="sm-header-icon" id="s-header-icon-box">
+                                    <img id="s-team-logo-img" class="sm-team-logo-img" src="" alt="Logo Helpdesk" style="display: none;" />
+                                    <i id="s-header-default-icon" data-lucide="headphones"></i>
                                 </div>
                                 <div>
                                     <h1 class="sm-main-title" id="s-main-title">Tecniscan — Reporte Ejecutivo de Soporte y Horas</h1>
@@ -715,8 +716,16 @@
                                 </div>
                             </div>
                             <div class="sm-header-right">
-                                <div class="sm-brand-tag">GENESYS CLOUD CX</div>
-                                <div class="sm-brand-sub">ESMT CONSULTING</div>
+                                <div class="sm-brand-text">
+                                    <div class="sm-brand-tag" id="s-brand-tag">GENESYS CLOUD CX</div>
+                                    <div class="sm-brand-sub" id="s-brand-sub">ESMT CONSULTING</div>
+                                </div>
+                                <div class="sm-esmt-logo-wrap" title="ESMT Consulting">
+                                    <img src="/static/img/company_logo.png" 
+                                         onerror="this.onerror=null; this.src='/api/esmt_logo';" 
+                                         class="sm-esmt-logo" 
+                                         alt="ESMT Consulting" />
+                                </div>
                             </div>
                         </header>
 

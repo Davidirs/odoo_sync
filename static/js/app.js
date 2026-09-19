@@ -1882,6 +1882,32 @@ ${stagesTableText}`;
         if (sTitle) sTitle.textContent = `${data.entity_name} — Reporte Ejecutivo de Soporte y Horas`;
         if (sPeriod) sPeriod.textContent = `Período: ${data.period_label || data.period_month} · Genesys Cloud CX`;
 
+        // Team / Helpdesk Logo Handling
+        const iconBox = document.getElementById("s-header-icon-box");
+        const teamLogoImg = document.getElementById("s-team-logo-img");
+        const defaultIcon = document.getElementById("s-header-default-icon");
+
+        if (data.has_team_logo && data.team_logo_url) {
+            if (teamLogoImg) {
+                teamLogoImg.src = data.team_logo_url;
+                teamLogoImg.style.display = "block";
+            }
+            if (defaultIcon) defaultIcon.style.display = "none";
+            if (iconBox) iconBox.classList.add("has-team-logo");
+        } else {
+            if (teamLogoImg) {
+                teamLogoImg.style.display = "none";
+                teamLogoImg.src = "";
+            }
+            if (defaultIcon) defaultIcon.style.display = "flex";
+            if (iconBox) iconBox.classList.remove("has-team-logo");
+        }
+
+        const esmtLogoImg = document.querySelector(".sm-esmt-logo");
+        if (esmtLogoImg && data.esmt_logo_url) {
+            esmtLogoImg.src = data.esmt_logo_url;
+        }
+
         // Top 7 KPI Ribbon
         const elAvail = document.getElementById("s-kpi-total-avail");
         const elUsed = document.getElementById("s-kpi-total-used");
@@ -1929,13 +1955,14 @@ ${stagesTableText}`;
                     if (t.stage_category === "Waiting Customer") badgeClass = "sm-badge-waiting";
                     else if (t.stage_category === "Work in Progress") badgeClass = "sm-badge-wip";
 
-                    const ticketHours = typeof t.unit_amount === "number" ? t.unit_amount.toFixed(1) : "0.0";
+                    const rawHours = typeof t.hours_spent === "number" ? t.hours_spent : (typeof t.unit_amount === "number" ? t.unit_amount : parseFloat(t.hours_spent || t.unit_amount || 0));
+                    const ticketHours = isNaN(rawHours) ? "0.0" : (rawHours % 1 === 0 ? rawHours.toFixed(1) : (Number.isInteger(rawHours * 10) ? rawHours.toFixed(1) : rawHours.toFixed(2)));
 
                     item.innerHTML = `
-                        <span class="sm-ticket-id">#${t.id}</span>
+                        <span class="sm-ticket-id"><a href="${t.odoo_url}" target="_blank" rel="noopener" style="color: inherit; text-decoration: none;">#${t.id}</a></span>
                         <span class="sm-ticket-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
                         <span class="sm-badge-pill ${badgeClass}">${escapeHtml(t.stage)}</span>
-                        <span class="sm-ticket-hours">${ticketHours}h</span>
+                        <span class="sm-ticket-hours" title="${rawHours.toFixed(2)} h consumidas">${ticketHours}h</span>
                         <span class="sm-ticket-days">${t.days_spent} d</span>
                     `;
                     ticketList.appendChild(item);
@@ -2105,9 +2132,15 @@ ${stagesTableText}`;
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                layout: {
+                    padding: {
+                        top: 22
+                    }
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
+                        grace: "20%",
                         ticks: {
                             callback: value => `${value} h`,
                             font: { size: 10 }
@@ -2123,11 +2156,32 @@ ${stagesTableText}`;
                     legend: { display: false },
                     tooltip: {
                         callbacks: {
-                            label: context => ` Consumo: ${context.raw.toFixed(2)} hrs`
+                            label: context => ` Consumo: ${Number(context.raw || 0).toFixed(2)} hrs`
                         }
                     }
                 }
-            }
+            },
+            plugins: [{
+                id: "alwaysShowBarValues",
+                afterDatasetsDraw(chart) {
+                    const { ctx } = chart;
+                    chart.data.datasets.forEach((dataset, i) => {
+                        const meta = chart.getDatasetMeta(i);
+                        meta.data.forEach((bar, index) => {
+                            const val = dataset.data[index];
+                            if (val === undefined || val === null) return;
+                            const numStr = `${Number(val).toFixed(2)} h`;
+                            ctx.save();
+                            ctx.font = "bold 11px Inter, system-ui, -apple-system, sans-serif";
+                            ctx.fillStyle = "#0369a1";
+                            ctx.textAlign = "center";
+                            ctx.textBaseline = "bottom";
+                            ctx.fillText(numStr, bar.x, bar.y - 5);
+                            ctx.restore();
+                        });
+                    });
+                }
+            }]
         });
     }
 

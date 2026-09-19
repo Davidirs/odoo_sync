@@ -2256,15 +2256,36 @@ body {
 }
 
 .sm-header-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 8px;
+    min-width: 46px;
+    height: 46px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.16);
     display: flex;
     align-items: center;
     justify-content: center;
     color: #38bdf8;
+    overflow: hidden;
+    padding: 3px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    transition: all 0.25s ease;
+}
+
+.sm-header-icon.has-team-logo {
+    background: #ffffff;
+    border-color: rgba(255, 255, 255, 0.6);
+    padding: 3px 8px;
+    min-width: 48px;
+    width: auto;
+}
+
+.sm-team-logo-img {
+    max-height: 40px;
+    max-width: 140px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: block;
 }
 
 .sm-main-title {
@@ -2283,7 +2304,16 @@ body {
 }
 
 .sm-header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
     text-align: right;
+}
+
+.sm-brand-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
 }
 
 .sm-brand-tag {
@@ -2298,6 +2328,30 @@ body {
     color: #94a3b8;
     font-weight: 600;
     letter-spacing: 0.5px;
+}
+
+.sm-esmt-logo-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 4px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.sm-esmt-logo {
+    height: 34px;
+    width: auto;
+    max-width: 110px;
+    object-fit: contain;
+    display: block;
+    transition: transform 0.2s ease;
+}
+
+.sm-esmt-logo:hover {
+    transform: scale(1.05);
 }
 
 /* Master Top 7 KPI Ribbon */
@@ -2450,7 +2504,8 @@ body {
     font-size: 0.7rem;
     font-weight: 700;
     color: #0f172a;
-    width: 44px;
+    min-width: 44px;
+    width: auto;
     text-align: right;
     flex-shrink: 0;
 }

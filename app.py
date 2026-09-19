@@ -3,7 +3,7 @@ import json
 import xmlrpc.client
 import secrets
 from datetime import timedelta, datetime
-from flask import Flask, render_template, request, jsonify, session, Response
+from flask import Flask, render_template, request, jsonify, session, Response, redirect, make_response, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 import requests
@@ -1391,27 +1391,36 @@ def get_executive_report_data():
         start_dt_str = f"{start_date} 00:00:00"
         end_dt_str = f"{end_date} 23:59:59"
 
-        # Resolve entity name
+        # Resolve entity name and team logo
         entity_name = "Cliente / Helpdesk"
+        has_team_logo = False
+        team_logo_url = None
+
         if filter_type == "partner":
             partner_res = models.execute_kw(
                 ODOO_DB, uid, pwd,
                 "res.partner", "read",
                 [[filter_id]],
-                {"fields": ["name"]}
+                {"fields": ["name", "image_128"]}
             )
             if partner_res:
                 entity_name = partner_res[0].get("name", "Cliente")
+                if partner_res[0].get("image_128"):
+                    has_team_logo = True
+                    team_logo_url = f"{ODOO_URL}/web/image?model=res.partner&id={filter_id}&field=image_128"
             domain_filter = ["|", ("partner_id", "=", filter_id), ("commercial_partner_id", "=", filter_id)]
         else:
             team_res = models.execute_kw(
                 ODOO_DB, uid, pwd,
                 "helpdesk.team", "read",
                 [[filter_id]],
-                {"fields": ["name"]}
+                {"fields": ["name", "x_studio_logo"]}
             )
             if team_res:
                 entity_name = team_res[0].get("name", "Equipo Helpdesk")
+                if team_res[0].get("x_studio_logo"):
+                    has_team_logo = True
+                    team_logo_url = f"/api/team_logo/{filter_id}"
             domain_filter = [("team_id", "=", filter_id)]
 
         domain = domain_filter + [
@@ -1591,6 +1600,7 @@ def get_executive_report_data():
                 "end_date": end_date_str,
                 "days_spent": days_spent,
                 "hours_spent": round(t_hours, 2),
+                "unit_amount": round(t_hours, 2),
                 "odoo_url": odoo_url
             })
 
@@ -1690,6 +1700,9 @@ def get_executive_report_data():
             "entity_name": entity_name,
             "filter_type": filter_type,
             "filter_id": filter_id,
+            "has_team_logo": has_team_logo,
+            "team_logo_url": team_logo_url,
+            "esmt_logo_url": "/api/esmt_logo",
             "start_date": start_date,
             "end_date": end_date,
             "period_label": period_label,
@@ -1724,6 +1737,36 @@ def get_executive_report_data():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/team_logo/<int:team_id>", methods=["GET"])
+def get_team_logo(team_id):
+    """Serve team logo directly as PNG with caching, or redirect to Odoo."""
+    uid, pwd, models, _ = get_auth_connection()
+    if uid and models:
+        try:
+            res = models.execute_kw(
+                ODOO_DB, uid, pwd,
+                "helpdesk.team", "read",
+                [[team_id]],
+                {"fields": ["x_studio_logo"]}
+            )
+            if res and res[0].get("x_studio_logo"):
+                import base64
+                img_bytes = base64.b64decode(res[0]["x_studio_logo"])
+                resp = make_response(img_bytes)
+                resp.headers.set("Content-Type", "image/png")
+                resp.headers.set("Cache-Control", "public, max-age=86400")
+                return resp
+        except Exception as e:
+            print(f"Error fetching team logo for {team_id}: {e}")
+    return redirect(f"{ODOO_URL}/web/image?model=helpdesk.team&id={team_id}&field=x_studio_logo")
+
+
+@app.route("/api/esmt_logo", methods=["GET"])
+def get_esmt_logo():
+    """Serve official ESMT logo directly as PNG."""
+    return send_from_directory(os.path.join(app.root_path, "static", "img"), "company_logo.png", mimetype="image/png")
 
 
 if __name__ == "__main__":
