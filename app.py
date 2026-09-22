@@ -744,7 +744,8 @@ def get_monthly_tickets():
             "close_date",
             "total_hours_spent",
             "description",
-            "message_ids"
+            "message_ids",
+            "tag_ids"
         ]
 
         tickets = models.execute_kw(
@@ -756,6 +757,22 @@ def get_monthly_tickets():
             [domain],
             {"fields": fields, "order": "id asc"}
         )
+
+        # Batch-read all tag names/colors for this set of tickets
+        all_tag_ids_monthly = list({tid for t in tickets for tid in (t.get("tag_ids") or [])})
+        tag_map_monthly = {}
+        if all_tag_ids_monthly:
+            try:
+                tag_records = models.execute_kw(
+                    ODOO_DB, uid, password,
+                    "helpdesk.tag", "read",
+                    [all_tag_ids_monthly],
+                    {"fields": ["id", "name", "color"]}
+                )
+                for tr in tag_records:
+                    tag_map_monthly[tr["id"]] = {"id": tr["id"], "name": tr["name"], "color": tr.get("color", 0)}
+            except Exception as tag_err:
+                print(f"Error reading tags (monthly): {tag_err}")
 
         type_counts = {}
         total_hours = 0.0
@@ -865,6 +882,8 @@ def get_monthly_tickets():
 
             odoo_url = f"{ODOO_URL}/web#id={ticket_id}&cids=1&menu_id=352&action=475&model=helpdesk.ticket&view_type=form"
 
+            ticket_tags = [tag_map_monthly[tid] for tid in (t.get("tag_ids") or []) if tid in tag_map_monthly]
+
             formatted_tickets.append({
                 "id": ticket_id,
                 "name": t.get("name") or "(Sin Asunto)",
@@ -877,6 +896,7 @@ def get_monthly_tickets():
                 "hours_spent": hours,
                 "description": desc_clean[:250],
                 "notes": recent_notes[-3:], # Only top 3 clean messages
+                "tags": ticket_tags,
                 "odoo_url": odoo_url
             })
 
@@ -1431,7 +1451,7 @@ def get_executive_report_data():
         fields = [
             "id", "name", "stage_id", "priority", "ticket_type_id",
             "create_date", "close_date", "write_date", "total_hours_spent",
-            "timesheet_ids", "user_id", "partner_id", "team_id", "description"
+            "timesheet_ids", "user_id", "partner_id", "team_id", "description", "tag_ids"
         ]
 
         tickets = models.execute_kw(
@@ -1440,6 +1460,22 @@ def get_executive_report_data():
             [domain],
             {"fields": fields, "order": "id asc"}
         )
+
+        # Batch-read tags for executive report
+        all_tag_ids_exec = list({tid for t in tickets for tid in (t.get("tag_ids") or [])})
+        tag_map_exec = {}
+        if all_tag_ids_exec:
+            try:
+                tag_records_exec = models.execute_kw(
+                    ODOO_DB, uid, pwd,
+                    "helpdesk.tag", "read",
+                    [all_tag_ids_exec],
+                    {"fields": ["id", "name", "color"]}
+                )
+                for tr in tag_records_exec:
+                    tag_map_exec[tr["id"]] = {"id": tr["id"], "name": tr["name"], "color": tr.get("color", 0)}
+            except Exception as tag_err:
+                print(f"Error reading tags (executive): {tag_err}")
 
         # Collect timesheet details
         all_ts_ids = []
@@ -1588,6 +1624,8 @@ def get_executive_report_data():
 
             odoo_url = f"{ODOO_URL}/web#id={t_id}&cids=1&menu_id=352&action=475&model=helpdesk.ticket&view_type=form"
 
+            ticket_tags_exec = [tag_map_exec[tid] for tid in (t.get("tag_ids") or []) if tid in tag_map_exec]
+
             formatted_tickets.append({
                 "id": t_id,
                 "name": t.get("name") or "(Sin Asunto)",
@@ -1601,6 +1639,7 @@ def get_executive_report_data():
                 "days_spent": days_spent,
                 "hours_spent": round(t_hours, 2),
                 "unit_amount": round(t_hours, 2),
+                "tags": ticket_tags_exec,
                 "odoo_url": odoo_url
             })
 

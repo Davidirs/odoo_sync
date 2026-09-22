@@ -838,14 +838,43 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // ─── TAG CHIP HELPER ───────────────────────────────────────────────────────
+    // Odoo uses an integer color index (0-11). We map it to pleasant pill colors.
+    const ODOO_TAG_COLORS = [
+        "#6366f1", // 0 – indigo
+        "#10b981", // 1 – emerald
+        "#f59e0b", // 2 – amber
+        "#ef4444", // 3 – red
+        "#8b5cf6", // 4 – violet
+        "#06b6d4", // 5 – cyan
+        "#f97316", // 6 – orange
+        "#ec4899", // 7 – pink
+        "#14b8a6", // 8 – teal
+        "#64748b", // 9 – slate
+        "#a16207", // 10 – yellow-dark
+        "#0ea5e9"  // 11 – sky
+    ];
+
+    function tagChipsHtml(tags) {
+        if (!tags || tags.length === 0) return "";
+        return tags.map(tag => {
+            const bg = ODOO_TAG_COLORS[tag.color % ODOO_TAG_COLORS.length] || "#6366f1";
+            return `<span class="ticket-tag-chip" style="background:${bg}20; color:${bg}; border-color:${bg}40;">${escapeHtml(tag.name)}</span>`;
+        }).join("");
+    }
+
     function renderReportTable(tickets) {
         elements.tableCountBadge.textContent = `${tickets.length} tickets`;
         const rowsHtml = tickets.map(t => {
             const dateStr = t.create_date ? t.create_date.replace("T", " ") : "-";
+            const chips = tagChipsHtml(t.tags);
             return `
             <tr>
                 <td class="tbl-id">#${t.id}</td>
-                <td class="tbl-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</td>
+                <td class="tbl-name" title="${escapeHtml(t.name)}">
+                    <span>${escapeHtml(t.name)}</span>
+                    ${chips ? `<div class="ticket-tags-row">${chips}</div>` : ""}
+                </td>
                 <td><span class="badge-pill">${escapeHtml(t.type)}</span></td>
                 <td><strong>${t.hours_spent ? t.hours_spent.toFixed(2) + "h" : "00:00"}</strong></td>
                 <td>${dateStr}</td>
@@ -1598,14 +1627,17 @@ ${stagesTableText}`;
             hInput.value = savedHours;
         }
 
-        // Set default to July 2026 (matching Tecniscan demo) or current month
+        // Set default to current month
         if (dStart && dEnd) {
-            dStart.value = "2026-07-01";
-            dEnd.value = "2026-07-31";
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, "0");
+            const d = String(now.getDate()).padStart(2, "0");
+            dStart.value = `${y}-${m}-01`;
+            dEnd.value = `${y}-${m}-${d}`;
         }
 
         // Presets
-        const pJuly = document.getElementById("preset-july-2026");
         const pThisMonth = document.getElementById("preset-this-month");
         const pLast30 = document.getElementById("preset-last-30");
         const pYear = document.getElementById("preset-year-2026");
@@ -1614,17 +1646,6 @@ ${stagesTableText}`;
             document.querySelectorAll(".exec-presets-chips .btn-chip").forEach(b => b.classList.remove("active"));
         }
 
-        if (pJuly) {
-            pJuly.addEventListener("click", () => {
-                clearPresetActive();
-                pJuly.classList.add("active");
-                if (dStart && dEnd) {
-                    dStart.value = "2026-07-01";
-                    dEnd.value = "2026-07-31";
-                    fetchExecutiveData();
-                }
-            });
-        }
 
         if (pThisMonth) {
             pThisMonth.addEventListener("click", () => {
@@ -1768,24 +1789,16 @@ ${stagesTableText}`;
             return;
         }
 
-        let defaultSelectedId = null;
-
         list.forEach(item => {
             const opt = document.createElement("option");
             opt.value = item.id;
             const extra = item.tickets_count ? ` (${item.tickets_count} tickets)` : "";
             opt.textContent = `${item.name}${extra}`;
-
-            // Priority default: Tecniscan
-            if (item.name.toLowerCase().includes("tecniscan") && !defaultSelectedId) {
-                defaultSelectedId = item.id;
-            }
             select.appendChild(opt);
         });
 
-        if (defaultSelectedId) {
-            select.value = defaultSelectedId;
-        } else if (list.length > 0) {
+        // Always default to first in list
+        if (list.length > 0) {
             select.value = list[0].id;
         }
     }
@@ -1958,9 +1971,14 @@ ${stagesTableText}`;
                     const rawHours = typeof t.hours_spent === "number" ? t.hours_spent : (typeof t.unit_amount === "number" ? t.unit_amount : parseFloat(t.hours_spent || t.unit_amount || 0));
                     const ticketHours = isNaN(rawHours) ? "0.0" : (rawHours % 1 === 0 ? rawHours.toFixed(1) : (Number.isInteger(rawHours * 10) ? rawHours.toFixed(1) : rawHours.toFixed(2)));
 
+                    const chips = tagChipsHtml(t.tags);
+
                     item.innerHTML = `
                         <span class="sm-ticket-id"><a href="${t.odoo_url}" target="_blank" rel="noopener" style="color: inherit; text-decoration: none;">#${t.id}</a></span>
-                        <span class="sm-ticket-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+                        <span class="sm-ticket-name" title="${escapeHtml(t.name)}">
+                            ${escapeHtml(t.name)}
+                            ${chips ? `<span class="sm-ticket-tags">${chips}</span>` : ""}
+                        </span>
                         <span class="sm-badge-pill ${badgeClass}">${escapeHtml(t.stage)}</span>
                         <span class="sm-ticket-hours" title="${rawHours.toFixed(2)} h consumidas">${ticketHours}h</span>
                         <span class="sm-ticket-days">${t.days_spent} d</span>

@@ -1983,6 +1983,38 @@ body {
     white-space: nowrap;
 }
 
+.tbl-name > span {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ticket-tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.ticket-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 20px;
+    border: 1px solid;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    cursor: default;
+    transition: filter 0.15s ease;
+}
+
+.ticket-tag-chip:hover {
+    filter: brightness(1.15);
+}
+
 .tbl-link {
     color: var(--odoo-brand);
     text-decoration: none;
@@ -2485,6 +2517,17 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+}
+
+.sm-ticket-tags {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
 }
 
 .sm-ticket-badge {
