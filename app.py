@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import xmlrpc.client
 import secrets
 from datetime import timedelta, datetime
@@ -208,6 +209,82 @@ def get_odoo_connection(user, password):
     return None, None
 
 
+# In-memory cache for helpdesk tags to avoid repetitive network overhead
+TAGS_CACHE = {"data": {}, "expires": datetime.min}
+
+
+def get_helpdesk_tags_map(models, uid, password):
+    """Fetch and cache helpdesk.tag records (id -> {id, name, color}) for 10 minutes."""
+    global TAGS_CACHE
+    now = datetime.utcnow()
+    if TAGS_CACHE["data"] and now < TAGS_CACHE["expires"]:
+        return TAGS_CACHE["data"]
+    try:
+        tags = models.execute_kw(
+            ODOO_DB, uid, password,
+            "helpdesk.tag", "search_read",
+            [[]],
+            {"fields": ["id", "name", "color"]}
+        )
+        tag_map = {t["id"]: {"id": t["id"], "name": t["name"], "color": t.get("color", 0)} for t in tags}
+        TAGS_CACHE = {"data": tag_map, "expires": now + timedelta(minutes=10)}
+        return tag_map
+    except Exception as e:
+        print(f"Error fetching helpdesk.tag map: {e}")
+        return TAGS_CACHE.get("data", {})
+
+
+def resolve_ticket_type(ticket, tag_map=None):
+    """
+    Determine ticket type.
+    In Odoo <18: ticket_type_id was a Many2one field.
+    In Odoo >=18/19: ticket_type_id was deprecated/removed and types are stored in tag_ids ('Request', 'Incident', 'Change', etc.).
+    """
+    # 1. Legacy Many2one field if present in ticket dictionary
+    tt_val = ticket.get("ticket_type_id")
+    if tt_val:
+        raw_name = tt_val[1] if isinstance(tt_val, (list, tuple)) and len(tt_val) > 1 else str(tt_val)
+        low = raw_name.lower()
+        if "inciden" in low:
+            return "Incidente"
+        if "cambio" in low or "change" in low:
+            return "Cambio"
+        if "problema" in low or "problem" in low:
+            return "Problema"
+        if "soporte" in low or "support" in low:
+            return "Soporte"
+        if "pregunta" in low or "question" in low:
+            return "Pregunta"
+        if "request" in low or "requerim" in low:
+            return "Requerimiento"
+        return raw_name
+
+    # 2. Check tags (Odoo 18/19 pattern)
+    tag_ids = ticket.get("tag_ids") or []
+    if tag_map and tag_ids:
+        for tid in tag_ids:
+            tag_info = tag_map.get(tid)
+            if not tag_info:
+                continue
+            tname = tag_info.get("name", "")
+            low = tname.lower().strip()
+            if "inciden" in low:
+                return "Incidente"
+            if "cambio" in low or "change" in low:
+                return "Cambio"
+            if "problema" in low or "problem" in low:
+                return "Problema"
+            if "soporte" in low or "support" in low:
+                return "Soporte"
+            if "pregunta" in low or "question" in low:
+                return "Pregunta"
+            if "request" in low or "requerim" in low:
+                return "Requerimiento"
+
+    return "Requerimiento"
+
+
+
 @app.route("/")
 def index():
     return render_template(
@@ -357,9 +434,9 @@ def get_tickets():
             "create_date",
             "write_date",
             "description",
-            "ticket_type_id",
             "team_id",
-            "kanban_state"
+            "kanban_state",
+            "tag_ids"
         ]
 
         tickets = models.execute_kw(
@@ -371,6 +448,8 @@ def get_tickets():
             [[]],
             {"limit": limit, "order": "id desc", "fields": fields}
         )
+
+        tag_map = get_helpdesk_tags_map(models, uid, password)
 
         formatted_tickets = []
         stats = {
@@ -399,8 +478,7 @@ def get_tickets():
             team_data = t.get("team_id")
             team_name = team_data[1] if team_data else "General"
 
-            type_data = t.get("ticket_type_id")
-            ticket_type = type_data[1] if type_data else "Soporte"
+            ticket_type = resolve_ticket_type(t, tag_map)
 
             try:
                 priority = int(t.get("priority", "0"))
@@ -737,7 +815,6 @@ def get_monthly_tickets():
             "id",
             "name",
             "partner_id",
-            "ticket_type_id",
             "stage_id",
             "create_date",
             "write_date",
@@ -778,15 +855,6 @@ def get_monthly_tickets():
         total_hours = 0.0
         formatted_tickets = []
 
-        TYPE_TRANSLATIONS = {
-            "request": "Requerimiento",
-            "incident": "Incidente",
-            "question": "Preguntas",
-            "change": "Cambio",
-            "problem": "Problema",
-            "support": "Soporte"
-        }
-
         total_days_sum = 0
         stage_counts = {
             "New": 0,
@@ -800,9 +868,7 @@ def get_monthly_tickets():
 
         for t in tickets:
             ticket_id = t["id"]
-            type_data = t.get("ticket_type_id")
-            raw_type = type_data[1] if type_data else "Requerimiento"
-            type_name = TYPE_TRANSLATIONS.get(raw_type.lower(), raw_type)
+            type_name = resolve_ticket_type(t, tag_map_monthly)
             type_counts[type_name] = type_counts.get(type_name, 0) + 1
 
             hours = float(t.get("total_hours_spent") or 0.0)
@@ -1355,9 +1421,7 @@ def get_executive_filters():
             partner_groups = models.execute_kw(
                 ODOO_DB, uid, pwd,
                 "helpdesk.ticket", "read_group",
-                [[["partner_id", "!=", False]]],
-                ["partner_id"],
-                ["partner_id"],
+                [[["partner_id", "!=", False]], ["partner_id"], ["partner_id"]],
                 {"limit": 100, "orderby": "partner_id_count desc"}
             )
             seen_ids = set()
@@ -1449,7 +1513,7 @@ def get_executive_report_data():
         ]
 
         fields = [
-            "id", "name", "stage_id", "priority", "ticket_type_id",
+            "id", "name", "stage_id", "priority",
             "create_date", "close_date", "write_date", "total_hours_spent",
             "timesheet_ids", "user_id", "partner_id", "team_id", "description", "tag_ids"
         ]
@@ -1524,16 +1588,6 @@ def get_executive_report_data():
                     collaborator_tickets[u_name] = set()
                 collaborator_tickets[u_name].add(t["id"])
 
-        # Type translation
-        TYPE_TRANSLATIONS = {
-            "request": "Requerimientos",
-            "incident": "Incidente",
-            "question": "Preguntas",
-            "change": "Cambio",
-            "problem": "Problema",
-            "support": "Soporte"
-        }
-
         type_counts = {}
         total_days_sum = 0
         max_days = 0
@@ -1553,9 +1607,7 @@ def get_executive_report_data():
 
         for t in tickets:
             t_id = t["id"]
-            type_data = t.get("ticket_type_id")
-            raw_type = type_data[1] if type_data else "Requerimientos"
-            type_name = TYPE_TRANSLATIONS.get(raw_type.lower(), raw_type)
+            type_name = resolve_ticket_type(t, tag_map_exec)
             type_counts[type_name] = type_counts.get(type_name, 0) + 1
 
             stage_data = t.get("stage_id")
@@ -1667,6 +1719,8 @@ def get_executive_report_data():
         type_dist = []
         for t_name in ["Requerimientos", "Incidente", "Cambio", "Problema", "Preguntas"]:
             cnt = type_counts.get(t_name, 0)
+            if t_name == "Requerimientos" and cnt == 0:
+                cnt = type_counts.get("Requerimiento", 0)
             if cnt > 0 or t_name in ["Requerimientos", "Incidente", "Cambio"]:
                 pct = round((cnt / total_cases * 100), 1) if total_cases > 0 else 0.0
                 type_dist.append({"type": t_name, "count": cnt, "pct": pct})
@@ -1692,14 +1746,14 @@ def get_executive_report_data():
                 ODOO_DB, uid, pwd,
                 "helpdesk.ticket", "search_read",
                 [h_domain],
-                {"fields": ["id", "create_date", "ticket_type_id"]}
+                {"fields": ["id", "create_date", "tag_ids"]}
             )
             by_month = {}
             for ht in hist_tickets:
                 c_d = ht.get("create_date")
                 if c_d:
                     m_int = int(c_d[5:7])
-                    tt = (ht.get("ticket_type_id") or [0, "Requerimiento"])[1].lower()
+                    tt = resolve_ticket_type(ht, tag_map_exec).lower()
                     cat = "Incidente" if "inciden" in tt else ("Cambio" if "cambio" in tt or "change" in tt else "Requerimiento")
                     if m_int not in by_month:
                         by_month[m_int] = {"Incidente": 0, "Requerimiento": 0, "Cambio": 0, "Total": 0}
