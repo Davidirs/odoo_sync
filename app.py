@@ -3,12 +3,26 @@ import json
 import re
 import xmlrpc.client
 import secrets
+import io
+import base64
+import xml.sax.saxutils
 from datetime import timedelta, datetime
-from flask import Flask, render_template, request, jsonify, session, Response, redirect, make_response, send_from_directory
+from flask import Flask, render_template, request, jsonify, session, Response, redirect, make_response, send_from_directory, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 import requests
 import groq
+
+try:
+    import docx
+    from docx.shared import Inches, Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
 
 load_dotenv()
 
@@ -21,6 +35,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=timedelta(hours=6),
+    TEMPLATES_AUTO_RELOAD=True,
 )
 
 ODOO_URL = os.environ.get("ODOO_URL", "https://esmtcx.odoo.com").rstrip("/")
@@ -1378,7 +1393,295 @@ Responde ÚNICAMENTE con el párrafo del resumen en español neutro sin introduc
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def build_monthly_report_docx(data):
+    """Generates an executive, beautifully styled Microsoft Word (.docx) document matching the ESMT format."""
+    if not DOCX_AVAILABLE:
+        raise RuntimeError("python-docx is not installed.")
 
+    doc = docx.Document()
+
+    # 1-inch standard executive margins
+    for sec in doc.sections:
+        sec.top_margin = Inches(0.8)
+        sec.bottom_margin = Inches(0.8)
+        sec.left_margin = Inches(1.0)
+        sec.right_margin = Inches(1.0)
+
+    def add_banner(title_text):
+        tbl = doc.add_table(rows=1, cols=1)
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        tbl.autofit = False
+        cell = tbl.cell(0, 0)
+        cell.width = Inches(6.5)
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="EA580C"/>')
+        cell._tc.get_or_add_tcPr().append(shd)
+        tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="140" w:type="dxa"/><w:bottom w:w="140" w:type="dxa"/><w:left w:w="180" w:type="dxa"/><w:right w:w="180" w:type="dxa"/></w:tcMar>')
+        cell._tc.get_or_add_tcPr().append(tcMar)
+        p = cell.paragraphs[0]
+        p.paragraph_format.space_before = Pt(2)
+        p.paragraph_format.space_after = Pt(2)
+        run = p.add_run(title_text)
+        run.font.name = 'Calibri'
+        run.font.size = Pt(12)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(255, 255, 255)
+
+        p_spacer = doc.add_paragraph()
+        p_spacer.paragraph_format.space_before = Pt(0)
+        p_spacer.paragraph_format.space_after = Pt(4)
+
+    def add_subheading(sub_title):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(14)
+        p.paragraph_format.space_after = Pt(4)
+        run = p.add_run(sub_title)
+        run.font.name = 'Calibri'
+        run.font.size = Pt(12)
+        run.font.bold = True
+        run.font.color.rgb = RGBColor(234, 88, 12)
+
+    def add_intro(intro_text):
+        if not intro_text:
+            return
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(2)
+        p.paragraph_format.space_after = Pt(10)
+        p.paragraph_format.line_spacing = 1.15
+        run = p.add_run(intro_text)
+        run.font.name = 'Calibri'
+        run.font.size = Pt(10.5)
+        run.font.color.rgb = RGBColor(51, 51, 51)
+
+    def add_hyperlink(paragraph, url, text, color="EA580C", bold=True):
+        if not url or url == "#" or not str(url).startswith("http"):
+            run = paragraph.add_run(text)
+            run.font.name = 'Calibri'
+            run.font.bold = bold
+            run.font.color.rgb = RGBColor(234, 88, 12)
+            run.font.size = Pt(11)
+            return
+        try:
+            part = paragraph.part
+            r_id = part.relate_to(url, docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+            hyperlink = parse_xml(f'<w:hyperlink {nsdecls("w", "r")} r:id="{r_id}"/>')
+            escaped_text = xml.sax.saxutils.escape(text)
+            new_run = parse_xml(f'<w:r {nsdecls("w")}><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:color w:val="{color}"/><w:b/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">{escaped_text}</w:t></w:r>')
+            hyperlink.append(new_run)
+            paragraph._p.append(hyperlink)
+        except Exception:
+            run = paragraph.add_run(text)
+            run.font.name = 'Calibri'
+            run.font.bold = bold
+            run.font.color.rgb = RGBColor(234, 88, 12)
+            run.font.size = Pt(11)
+
+    def add_table(headers, rows, col_widths=None, total_row=None, col_alignments=None):
+        col_count = len(headers)
+        tbl = doc.add_table(rows=0, cols=col_count)
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        tbl.autofit = False
+        tblPr = tbl._tbl.tblPr
+        borders = parse_xml(
+            f'<w:tblBorders {nsdecls("w")}>'
+            f'<w:top w:val="single" w:sz="4" w:space="0" w:color="FED7AA"/>'
+            f'<w:bottom w:val="single" w:sz="8" w:space="0" w:color="EA580C"/>'
+            f'<w:left w:val="none"/>'
+            f'<w:right w:val="none"/>'
+            f'<w:insideH w:val="single" w:sz="4" w:space="0" w:color="FED7AA"/>'
+            f'<w:insideV w:val="none"/>'
+            f'</w:tblBorders>'
+        )
+        tblPr.append(borders)
+
+        # Header
+        hdr_row = tbl.add_row()
+        trPr = hdr_row._tr.get_or_add_trPr()
+        trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+        trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+        for i, title in enumerate(headers):
+            cell = hdr_row.cells[i]
+            if col_widths and i < len(col_widths):
+                cell.width = col_widths[i]
+            shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="EA580C"/>')
+            cell._tc.get_or_add_tcPr().append(shd)
+            tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="120" w:type="dxa"/><w:bottom w:w="120" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>')
+            cell._tc.get_or_add_tcPr().append(tcMar)
+            p = cell.paragraphs[0]
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(0)
+            if col_alignments and i < len(col_alignments):
+                p.alignment = col_alignments[i]
+            run = p.add_run(str(title))
+            run.font.name = 'Calibri'
+            run.font.size = Pt(10)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
+
+        # Rows
+        for r_idx, row_data in enumerate(rows):
+            row = tbl.add_row()
+            trPr = row._tr.get_or_add_trPr()
+            trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+            bg_color = 'FFFAF5' if (r_idx % 2 == 1) else 'FFFFFF'
+            for i, val in enumerate(row_data):
+                cell = row.cells[i]
+                if col_widths and i < len(col_widths):
+                    cell.width = col_widths[i]
+                if bg_color != 'FFFFFF':
+                    shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg_color}"/>')
+                    cell._tc.get_or_add_tcPr().append(shd)
+                tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>')
+                cell._tc.get_or_add_tcPr().append(tcMar)
+                p = cell.paragraphs[0]
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                if col_alignments and i < len(col_alignments):
+                    p.alignment = col_alignments[i]
+                run = p.add_run(str(val))
+                run.font.name = 'Calibri'
+                run.font.size = Pt(9.5)
+                run.font.color.rgb = RGBColor(51, 51, 51)
+
+        # Total / Footer Row
+        if total_row:
+            row = tbl.add_row()
+            trPr = row._tr.get_or_add_trPr()
+            trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
+            for i, val in enumerate(total_row):
+                cell = row.cells[i]
+                if col_widths and i < len(col_widths):
+                    cell.width = col_widths[i]
+                shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="FFF7ED"/>')
+                cell._tc.get_or_add_tcPr().append(shd)
+                tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="100" w:type="dxa"/><w:bottom w:w="100" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>')
+                cell._tc.get_or_add_tcPr().append(tcMar)
+                p = cell.paragraphs[0]
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                if col_alignments and i < len(col_alignments):
+                    p.alignment = col_alignments[i]
+                run = p.add_run(str(val))
+                run.font.name = 'Calibri'
+                run.font.size = Pt(10)
+                run.font.bold = True
+                run.font.color.rgb = RGBColor(15, 23, 42)
+
+        p_after = doc.add_paragraph()
+        p_after.paragraph_format.space_before = Pt(0)
+        p_after.paragraph_format.space_after = Pt(8)
+
+    def add_chart_image(img_b64):
+        if not img_b64 or not str(img_b64).startswith('data:image'):
+            return
+        try:
+            _, encoded = str(img_b64).split(',', 1)
+            img_bytes = base64.b64decode(encoded)
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_before = Pt(6)
+            p.paragraph_format.space_after = Pt(12)
+            run = p.add_run()
+            run.add_picture(io.BytesIO(img_bytes), width=Inches(5.5))
+        except Exception as e:
+            print(f"Could not embed chart image in docx: {e}")
+
+    # ================= 1. RESUMEN DE SOPORTE =================
+    sec1 = data.get('section1', {})
+    add_banner(sec1.get('header', '1.   RESUMEN DE SOPORTE'))
+    add_intro(sec1.get('intro', ''))
+    for item in sec1.get('items', []):
+        p_t = doc.add_paragraph()
+        p_t.paragraph_format.space_before = Pt(8)
+        p_t.paragraph_format.space_after = Pt(2)
+        raw_title = item.get('title', '').strip()
+        ticket_id = item.get('id', '')
+        title_text = f"{raw_title} (#{ticket_id})" if (ticket_id and f"#{ticket_id}" not in raw_title) else raw_title
+        add_hyperlink(p_t, item.get('url', ''), title_text)
+
+        p_d = doc.add_paragraph()
+        p_d.paragraph_format.space_before = Pt(0)
+        p_d.paragraph_format.space_after = Pt(10)
+        p_d.paragraph_format.line_spacing = 1.15
+        run_d = p_d.add_run(item.get('summary', ''))
+        run_d.font.name = 'Calibri'
+        run_d.font.size = Pt(10)
+        run_d.font.color.rgb = RGBColor(51, 51, 51)
+
+    # ================= 2. VOLUMEN DE CASOS =================
+    sec2 = data.get('section2')
+    if sec2 and sec2.get('rows'):
+        add_banner(sec2.get('header', '2.   VOLUMEN DE CASOS'))
+        add_intro(sec2.get('intro', ''))
+        widths = [Inches(4.5), Inches(2.0)]
+        aligns = [WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER]
+        tot = ['Total', str(sec2.get('total', '0'))]
+        add_table(sec2.get('headers', ['Tipo de caso', 'Cantidad']), sec2.get('rows', []), widths, tot, aligns)
+        if sec2.get('chart_image'):
+            add_chart_image(sec2.get('chart_image'))
+
+    # ================= 3. TIEMPO PROMEDIO =================
+    sec3 = data.get('section3')
+    if sec3 and sec3.get('rows'):
+        add_subheading(sec3.get('header', 'TIEMPO PROMEDIO'))
+        add_intro(sec3.get('intro', ''))
+        widths = [Inches(0.8), Inches(2.7), Inches(1.1), Inches(1.1), Inches(0.8)]
+        aligns = [WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.CENTER]
+        tot = ['', '', '', 'Días Promedio', str(sec3.get('average', '0'))]
+        add_table(sec3.get('headers', ['ID', 'Asunto', 'Creado el', 'Última actualización', 'Días']), sec3.get('rows', []), widths, tot, aligns)
+
+    # ================= 4. HISTORIAL DE HORAS =================
+    sec4 = data.get('section4')
+    if sec4 and sec4.get('rows'):
+        add_subheading(sec4.get('header', 'HISTORIAL DE HORAS'))
+        add_intro(sec4.get('intro', ''))
+        widths = [Inches(0.8), Inches(3.4), Inches(1.3), Inches(1.0)]
+        aligns = [WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.CENTER]
+        tot = ['', '', 'Total de horas', str(sec4.get('total', '0.00'))]
+        add_table(sec4.get('headers', ['ID', 'Asunto', 'Estado', 'Horas']), sec4.get('rows', []), widths, tot, aligns)
+
+    # ================= 5. ESTADO DE LOS TICKETS =================
+    sec5 = data.get('section5')
+    if sec5 and sec5.get('rows'):
+        add_subheading(sec5.get('header', 'ESTADO DE LOS TICKETS'))
+        add_intro(sec5.get('intro', ''))
+        widths = [Inches(4.5), Inches(2.0)]
+        aligns = [WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER]
+        tot = ['Total', str(sec5.get('total', '0'))]
+        add_table(sec5.get('headers', ['Estado', 'Cantidad']), sec5.get('rows', []), widths, tot, aligns)
+        if sec5.get('chart_image'):
+            add_chart_image(sec5.get('chart_image'))
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+@app.route("/api/reports/export-docx", methods=["POST"])
+def export_monthly_report_docx():
+    """Generates and downloads a native editable Word (.docx) report."""
+    if not DOCX_AVAILABLE:
+        return jsonify({"success": False, "error": "La librería python-docx no está disponible en el entorno."}), 500
+
+    data = request.get_json() or {}
+    client_name = (data.get("client_name") or "Cliente").strip()
+    period = (data.get("period") or "Periodo").strip()
+
+    try:
+        docx_bytes = build_monthly_report_docx(data)
+        safe_client = re.sub(r'[^a-zA-Z0-9_\-]', '_', client_name)
+        safe_period = re.sub(r'[^a-zA-Z0-9_\-]', '_', period)
+        filename = f"Informe_Soporte_{safe_client}_{safe_period}.docx"
+
+        return send_file(
+            io.BytesIO(docx_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        print(f"Error generando documento Word: {e}")
+        return jsonify({"success": False, "error": f"Error al generar el documento de Word: {str(e)}"}), 500
 
 
 def get_auth_connection():

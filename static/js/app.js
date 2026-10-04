@@ -151,6 +151,7 @@ document.addEventListener("DOMContentLoaded", () => {
         docItemsContainer: document.getElementById("doc-items-container"),
         btnCopyReportText: document.getElementById("btn-copy-report-text"),
         btnPrintReport: document.getElementById("btn-print-report"),
+        btnExportWord: document.getElementById("btn-export-word"),
         reportTableCard: document.getElementById("report-table-card"),
         tableCountBadge: document.getElementById("table-count-badge"),
         reportTableTbody: document.getElementById("report-table-tbody"),
@@ -1262,6 +1263,392 @@ ${stagesTableText}`;
         elements.btnPrintReport.addEventListener("click", () => {
             window.print();
         });
+    }
+
+    // Helper to capture chart canvas with white background for Word
+    function getCanvasBase64WithWhiteBg(canvasId) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !canvas.width || !canvas.height) return null;
+        try {
+            const offscreen = document.createElement("canvas");
+            offscreen.width = canvas.width;
+            offscreen.height = canvas.height;
+            const oCtx = offscreen.getContext("2d");
+            oCtx.fillStyle = "#ffffff";
+            oCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+            oCtx.drawImage(canvas, 0, 0);
+            return offscreen.toDataURL("image/png");
+        } catch (e) {
+            console.warn("Could not capture canvas:", e);
+            return null;
+        }
+    }
+
+    // Client-side fallback to generate Word-compatible (.doc) HTML document
+    function exportWordHtmlFallback(payload) {
+        const clientName = payload.client_name || "Cliente";
+        const period = payload.period || "Periodo";
+
+        let html = `
+<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta charset='utf-8'>
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+<w:DoNotOptimizeForBrowser/>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+  @page {
+    margin: 1.0in 1.0in 1.0in 1.0in;
+    mso-header-margin: 0.5in;
+    mso-footer-margin: 0.5in;
+  }
+  body {
+    font-family: 'Calibri', 'Arial', sans-serif;
+    font-size: 11pt;
+    color: #333333;
+    line-height: 1.25;
+  }
+  .banner {
+    background-color: #ea580c;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 12pt;
+    padding: 8px 12px;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  .subheading {
+    color: #ea580c;
+    font-weight: bold;
+    font-size: 12pt;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .intro {
+    font-size: 10.5pt;
+    color: #444444;
+    margin-bottom: 12px;
+  }
+  .ticket-title {
+    font-weight: bold;
+    font-size: 11pt;
+    color: #ea580c;
+    margin-top: 10px;
+    margin-bottom: 2px;
+  }
+  .ticket-title a {
+    color: #ea580c;
+    text-decoration: none;
+  }
+  .ticket-desc {
+    font-size: 10pt;
+    color: #333333;
+    margin-top: 0;
+    margin-bottom: 10px;
+    line-height: 1.25;
+  }
+  table.doc-tbl {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6px;
+    margin-bottom: 14px;
+    font-size: 9.5pt;
+  }
+  table.doc-tbl th {
+    background-color: #ea580c;
+    color: #ffffff;
+    font-weight: bold;
+    padding: 6px 10px;
+    border: 1px solid #ea580c;
+    text-align: left;
+  }
+  table.doc-tbl td {
+    padding: 6px 10px;
+    border: 1px solid #fed7aa;
+    color: #333333;
+  }
+  table.doc-tbl tr:nth-child(even) td {
+    background-color: #fffaf5;
+  }
+  table.doc-tbl tr.total-row td {
+    background-color: #fff7ed !important;
+    font-weight: bold;
+    color: #0f172a;
+    border-top: 2px solid #ea580c;
+  }
+</style>
+</head>
+<body>
+`;
+
+        const sec1 = payload.section1 || {};
+        html += `<div class="banner">${escapeHtml(sec1.header || "1. RESUMEN DE SOPORTE")}</div>`;
+        if (sec1.intro) {
+            html += `<div class="intro">${escapeHtml(sec1.intro)}</div>`;
+        }
+        (sec1.items || []).forEach(item => {
+            const rawTitle = item.title || "";
+            const tId = item.id || "";
+            const titleFull = tId && !rawTitle.includes(`#${tId}`) ? `${rawTitle} (#${tId})` : rawTitle;
+            html += `<div class="ticket-title"><a href="${escapeHtml(item.url || '#')}">${escapeHtml(titleFull)}</a></div>`;
+            html += `<div class="ticket-desc">${escapeHtml(item.summary || "")}</div>`;
+        });
+
+        const sec2 = payload.section2;
+        if (sec2 && sec2.rows && sec2.rows.length) {
+            html += `<div class="banner">${escapeHtml(sec2.header || "2. VOLUMEN DE CASOS")}</div>`;
+            if (sec2.intro) html += `<div class="intro">${escapeHtml(sec2.intro)}</div>`;
+            html += `<table class="doc-tbl"><thead><tr><th>Tipo de caso</th><th style="text-align:center;">Cantidad</th></tr></thead><tbody>`;
+            sec2.rows.forEach(r => {
+                html += `<tr><td>${escapeHtml(r[0])}</td><td style="text-align:center;">${escapeHtml(r[1])}</td></tr>`;
+            });
+            html += `<tr class="total-row"><td>Total</td><td style="text-align:center;">${escapeHtml(sec2.total || "0")}</td></tr></tbody></table>`;
+            if (sec2.chart_image) {
+                html += `<div style="text-align:center; margin: 10px 0;"><img src="${sec2.chart_image}" width="500" style="max-width:100%; height:auto;" /></div>`;
+            }
+        }
+
+        const sec3 = payload.section3;
+        if (sec3 && sec3.rows && sec3.rows.length) {
+            html += `<div class="subheading">${escapeHtml(sec3.header || "TIEMPO PROMEDIO")}</div>`;
+            if (sec3.intro) html += `<div class="intro">${escapeHtml(sec3.intro)}</div>`;
+            html += `<table class="doc-tbl"><thead><tr><th>ID</th><th>Asunto</th><th>Creado el</th><th>Última actualización</th><th style="text-align:center;">Días</th></tr></thead><tbody>`;
+            sec3.rows.forEach(r => {
+                html += `<tr><td>${escapeHtml(r[0])}</td><td>${escapeHtml(r[1])}</td><td>${escapeHtml(r[2])}</td><td>${escapeHtml(r[3])}</td><td style="text-align:center;">${escapeHtml(r[4])}</td></tr>`;
+            });
+            html += `<tr class="total-row"><td colspan="4" style="text-align:right;">Días Promedio</td><td style="text-align:center;">${escapeHtml(sec3.average || "0")}</td></tr></tbody></table>`;
+        }
+
+        const sec4 = payload.section4;
+        if (sec4 && sec4.rows && sec4.rows.length) {
+            html += `<div class="subheading">${escapeHtml(sec4.header || "HISTORIAL DE HORAS")}</div>`;
+            if (sec4.intro) html += `<div class="intro">${escapeHtml(sec4.intro)}</div>`;
+            html += `<table class="doc-tbl"><thead><tr><th>ID</th><th>Asunto</th><th>Estado</th><th style="text-align:center;">Horas</th></tr></thead><tbody>`;
+            sec4.rows.forEach(r => {
+                html += `<tr><td>${escapeHtml(r[0])}</td><td>${escapeHtml(r[1])}</td><td>${escapeHtml(r[2])}</td><td style="text-align:center;">${escapeHtml(r[3])}</td></tr>`;
+            });
+            html += `<tr class="total-row"><td colspan="3" style="text-align:right;">Total de horas</td><td style="text-align:center;">${escapeHtml(sec4.total || "0.00")}</td></tr></tbody></table>`;
+        }
+
+        const sec5 = payload.section5;
+        if (sec5 && sec5.rows && sec5.rows.length) {
+            html += `<div class="subheading">${escapeHtml(sec5.header || "ESTADO DE LOS TICKETS")}</div>`;
+            if (sec5.intro) html += `<div class="intro">${escapeHtml(sec5.intro)}</div>`;
+            html += `<table class="doc-tbl"><thead><tr><th>Estado</th><th style="text-align:center;">Cantidad</th></tr></thead><tbody>`;
+            sec5.rows.forEach(r => {
+                html += `<tr><td>${escapeHtml(r[0])}</td><td style="text-align:center;">${escapeHtml(r[1])}</td></tr>`;
+            });
+            html += `<tr class="total-row"><td>Total</td><td style="text-align:center;">${escapeHtml(sec5.total || "0")}</td></tr></tbody></table>`;
+            if (sec5.chart_image) {
+                html += `<div style="text-align:center; margin: 10px 0;"><img src="${sec5.chart_image}" width="500" style="max-width:100%; height:auto;" /></div>`;
+            }
+        }
+
+        html += `</body></html>`;
+        const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
+        const safeClient = clientName.replace(/[^a-zA-Z0-9_\-]/g, "_");
+        const safePeriod = period.replace(/[^a-zA-Z0-9_\-]/g, "_");
+        const filename = `Informe_Soporte_${safeClient}_${safePeriod}.doc`;
+
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+    }
+
+    // Export Full Report to Editable Word Document
+    async function exportReportToWord() {
+        const btn = elements.btnExportWord;
+        if (!btn) return;
+
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> <span>Exportando...</span>`;
+        if (window.lucide) window.lucide.createIcons();
+
+        try {
+            const clientName = elements.statClientName?.textContent?.trim() || elements.reportClientSelect?.options[elements.reportClientSelect.selectedIndex]?.text?.trim() || "Cliente";
+            const period = elements.statPeriodName?.textContent?.trim() || "Periodo";
+
+            // Section 1
+            const sec1Header = elements.docSectionHeader?.innerText?.trim() || "1.   RESUMEN DE SOPORTE";
+            const sec1Intro = elements.docIntroText?.innerText?.trim() || "";
+            const sec1Items = [];
+            document.querySelectorAll(".report-doc-item").forEach(item => {
+                const linkEl = item.querySelector(".report-item-title-link");
+                const rawTitle = linkEl?.innerText?.trim() || "";
+                const url = linkEl?.href || "";
+                const descEl = item.querySelector(".report-item-desc");
+                const summary = descEl?.innerText?.trim() || "";
+                const ticketId = item.dataset.ticketId || "";
+                
+                let cleanTitle = rawTitle;
+                if (ticketId && cleanTitle.includes(`(#${ticketId})`)) {
+                    cleanTitle = cleanTitle.replace(`(#${ticketId})`, "").trim();
+                }
+                if (rawTitle) {
+                    sec1Items.push({
+                        id: ticketId,
+                        title: cleanTitle || rawTitle,
+                        url: url,
+                        summary: summary
+                    });
+                }
+            });
+
+            // Section 2: Volumen de casos
+            let sec2 = null;
+            const volRows = [];
+            document.querySelectorAll("#volume-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 2) {
+                    volRows.push([tds[0].innerText.trim(), tds[1].innerText.trim()]);
+                }
+            });
+            if (volRows.length > 0) {
+                sec2 = {
+                    header: "2.   VOLUMEN DE CASOS",
+                    intro: document.getElementById("doc-volume-intro")?.innerText?.trim() || "",
+                    headers: ["Tipo de caso", "Cantidad"],
+                    rows: volRows,
+                    total: document.getElementById("volume-total-val")?.innerText?.trim() || "0",
+                    chart_image: getCanvasBase64WithWhiteBg("volume-chart-canvas")
+                };
+            }
+
+            // Section 3: Tiempo promedio
+            let sec3 = null;
+            const avgRows = [];
+            document.querySelectorAll("#avg-days-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 5) {
+                    avgRows.push([
+                        tds[0].innerText.trim(),
+                        tds[1].innerText.trim(),
+                        tds[2].innerText.trim(),
+                        tds[3].innerText.trim(),
+                        tds[4].innerText.trim()
+                    ]);
+                }
+            });
+            if (avgRows.length > 0) {
+                sec3 = {
+                    header: "TIEMPO PROMEDIO",
+                    intro: document.getElementById("doc-avg-days-intro")?.innerText?.trim() || "",
+                    headers: ["ID", "Asunto", "Creado el", "Última actualización", "Días"],
+                    rows: avgRows,
+                    average: document.getElementById("doc-avg-days-footer")?.innerText?.trim() || "0"
+                };
+            }
+
+            // Section 4: Historial de horas
+            let sec4 = null;
+            const hoursRows = [];
+            document.querySelectorAll("#hours-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 4) {
+                    hoursRows.push([
+                        tds[0].innerText.trim(),
+                        tds[1].innerText.trim(),
+                        tds[2].innerText.trim(),
+                        tds[3].innerText.trim()
+                    ]);
+                }
+            });
+            if (hoursRows.length > 0) {
+                sec4 = {
+                    header: "HISTORIAL DE HORAS",
+                    intro: document.getElementById("doc-hours-intro")?.innerText?.trim() || "",
+                    headers: ["ID", "Asunto", "Estado", "Horas"],
+                    rows: hoursRows,
+                    total: document.getElementById("doc-total-hours-val")?.innerText?.trim() || "0.00"
+                };
+            }
+
+            // Section 5: Estado de tickets
+            let sec5 = null;
+            const stagesRows = [];
+            document.querySelectorAll("#stages-table-tbody tr").forEach(tr => {
+                const tds = tr.querySelectorAll("td");
+                if (tds.length >= 2) {
+                    stagesRows.push([tds[0].innerText.trim(), tds[1].innerText.trim()]);
+                }
+            });
+            if (stagesRows.length > 0) {
+                sec5 = {
+                    header: "ESTADO DE LOS TICKETS",
+                    intro: document.getElementById("doc-stages-intro")?.innerText?.trim() || "",
+                    headers: ["Estado", "Cantidad"],
+                    rows: stagesRows,
+                    total: document.getElementById("doc-stages-total-val")?.innerText?.trim() || "0",
+                    chart_image: getCanvasBase64WithWhiteBg("stages-chart-canvas")
+                };
+            }
+
+            const payload = {
+                client_name: clientName,
+                period: period,
+                section1: {
+                    header: sec1Header,
+                    intro: sec1Intro,
+                    items: sec1Items
+                },
+                section2: sec2,
+                section3: sec3,
+                section4: sec4,
+                section5: sec5
+            };
+
+            const res = await fetch("/api/reports/export-docx", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                const blob = await res.blob();
+                const safeClient = clientName.replace(/[^a-zA-Z0-9_\-]/g, "_");
+                const safePeriod = period.replace(/[^a-zA-Z0-9_\-]/g, "_");
+                const filename = `Informe_Soporte_${safeClient}_${safePeriod}.docx`;
+
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = downloadUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(downloadUrl);
+                showToast("📄 Documento Word (.docx) descargado con éxito");
+            } else {
+                // Seamless fallback to client-side formatted Word document
+                exportWordHtmlFallback(payload);
+                showToast("📄 Documento Word descargado con éxito");
+            }
+        } catch (err) {
+            console.error("Error exporting report to Word:", err);
+            showToast(`❌ Error al exportar: ${err.message}`);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            if (window.lucide) window.lucide.createIcons();
+        }
+    }
+
+    if (elements.btnExportWord) {
+        elements.btnExportWord.addEventListener("click", exportReportToWord);
     }
 
     if (elements.btnGenerateAiReport) {
