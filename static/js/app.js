@@ -2007,6 +2007,14 @@ ${stagesTableText}`;
         const dStart = document.getElementById("exec-date-start");
         const dEnd = document.getElementById("exec-date-end");
         const hInput = document.getElementById("exec-contract-hours");
+        const monthSelect = document.getElementById("exec-month-select");
+        const btnPrevMonth = document.getElementById("btn-month-prev");
+        const btnNextMonth = document.getElementById("btn-month-next");
+
+        const MONTH_NAMES = [
+            "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+        ];
 
         // Load saved hours if any
         const savedHours = localStorage.getItem("odoo_contract_hours");
@@ -2014,14 +2022,34 @@ ${stagesTableText}`;
             hInput.value = savedHours;
         }
 
+        const now = new Date();
+        const curYear = now.getFullYear();
+        const curMonthIdx = now.getMonth();
+        const currentYM = `${curYear}-${String(curMonthIdx + 1).padStart(2, "0")}`;
+
+        // Populate Month Selector with a rolling 3-year range (Past year, Current year, Next year)
+        if (monthSelect) {
+            monthSelect.innerHTML = "";
+            for (let y = curYear - 1; y <= curYear + 1; y++) {
+                for (let m = 0; m < 12; m++) {
+                    const ymVal = `${y}-${String(m + 1).padStart(2, "0")}`;
+                    const opt = document.createElement("option");
+                    opt.value = ymVal;
+                    opt.textContent = `${MONTH_NAMES[m]} ${y}`;
+                    if (ymVal === currentYM) {
+                        opt.selected = true;
+                    }
+                    monthSelect.appendChild(opt);
+                }
+            }
+        }
+
         // Set default to current month
         if (dStart && dEnd) {
-            const now = new Date();
-            const y = now.getFullYear();
-            const m = String(now.getMonth() + 1).padStart(2, "0");
+            const m = String(curMonthIdx + 1).padStart(2, "0");
             const d = String(now.getDate()).padStart(2, "0");
-            dStart.value = `${y}-${m}-01`;
-            dEnd.value = `${y}-${m}-${d}`;
+            dStart.value = `${curYear}-${m}-01`;
+            dEnd.value = `${curYear}-${m}-${d}`;
         }
 
         // Presets
@@ -2033,20 +2061,58 @@ ${stagesTableText}`;
             document.querySelectorAll(".exec-presets-chips .btn-chip").forEach(b => b.classList.remove("active"));
         }
 
+        function applyMonthSelection(ymVal, triggerFetch = true) {
+            if (!ymVal) return;
+            const parts = ymVal.split("-");
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            const lastDay = new Date(y, m, 0).getDate();
+
+            if (dStart && dEnd) {
+                dStart.value = `${y}-${String(m).padStart(2, "0")}-01`;
+                dEnd.value = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+            }
+
+            clearPresetActive();
+            if (ymVal === currentYM && pThisMonth) {
+                pThisMonth.classList.add("active");
+            }
+
+            if (triggerFetch) {
+                fetchExecutiveData();
+            }
+        }
+
+        if (monthSelect) {
+            monthSelect.addEventListener("change", (e) => {
+                applyMonthSelection(e.target.value, true);
+            });
+        }
+
+        if (btnPrevMonth) {
+            btnPrevMonth.addEventListener("click", () => {
+                if (monthSelect && monthSelect.selectedIndex > 0) {
+                    monthSelect.selectedIndex--;
+                    applyMonthSelection(monthSelect.value, true);
+                }
+            });
+        }
+
+        if (btnNextMonth) {
+            btnNextMonth.addEventListener("click", () => {
+                if (monthSelect && monthSelect.selectedIndex < monthSelect.options.length - 1) {
+                    monthSelect.selectedIndex++;
+                    applyMonthSelection(monthSelect.value, true);
+                }
+            });
+        }
 
         if (pThisMonth) {
             pThisMonth.addEventListener("click", () => {
                 clearPresetActive();
                 pThisMonth.classList.add("active");
-                const now = new Date();
-                const y = now.getFullYear();
-                const m = String(now.getMonth() + 1).padStart(2, "0");
-                const d = String(now.getDate()).padStart(2, "0");
-                if (dStart && dEnd) {
-                    dStart.value = `${y}-${m}-01`;
-                    dEnd.value = `${y}-${m}-${d}`;
-                    fetchExecutiveData();
-                }
+                if (monthSelect) monthSelect.value = currentYM;
+                applyMonthSelection(currentYM, true);
             });
         }
 
@@ -2054,12 +2120,12 @@ ${stagesTableText}`;
             pLast30.addEventListener("click", () => {
                 clearPresetActive();
                 pLast30.classList.add("active");
-                const now = new Date();
-                const past = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+                const n = new Date();
+                const past = new Date(n.getTime() - (30 * 24 * 60 * 60 * 1000));
                 const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
                 if (dStart && dEnd) {
                     dStart.value = fmt(past);
-                    dEnd.value = fmt(now);
+                    dEnd.value = fmt(n);
                     fetchExecutiveData();
                 }
             });
@@ -2077,6 +2143,18 @@ ${stagesTableText}`;
                 }
             });
         }
+
+        // Sync month dropdown if dates are changed manually
+        function syncMonthFromInputs() {
+            if (!dStart || !dEnd || !monthSelect) return;
+            const s = dStart.value;
+            const e = dEnd.value;
+            if (s && e && s.substring(0, 7) === e.substring(0, 7)) {
+                monthSelect.value = s.substring(0, 7);
+            }
+        }
+        if (dStart) dStart.addEventListener("change", syncMonthFromInputs);
+        if (dEnd) dEnd.addEventListener("change", syncMonthFromInputs);
     }
 
     function setupExecutiveEventListeners() {
@@ -2084,6 +2162,7 @@ ${stagesTableText}`;
         const btnGenerate = document.getElementById("btn-exec-generate");
         const btnCapture = document.getElementById("btn-exec-capture-mode");
         const btnPrint = document.getElementById("btn-exec-print");
+        const btnDownloadImg = document.getElementById("btn-exec-download-img");
         const hInput = document.getElementById("exec-contract-hours");
 
         // Generate Report Button
@@ -2115,6 +2194,92 @@ ${stagesTableText}`;
             btnPrint.addEventListener("click", () => {
                 setTimeout(() => window.print(), 200);
             });
+        }
+
+        // Download Report Image (PNG)
+        if (btnDownloadImg) {
+            btnDownloadImg.addEventListener("click", downloadReportAsImage);
+        }
+    }
+
+    async function downloadReportAsImage() {
+        const slideCard = document.getElementById("slide-master-card");
+        const btn = document.getElementById("btn-exec-download-img");
+        if (!slideCard) {
+            showToast("No se encontró el reporte para exportar");
+            return;
+        }
+
+        if (typeof html2canvas === "undefined") {
+            showToast("Librería de captura no disponible");
+            return;
+        }
+
+        const originalHtml = btn ? btn.innerHTML : "";
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i data-lucide="loader" class="spin-icon"></i><span>Generando...</span>`;
+            if (window.lucide) lucide.createIcons();
+        }
+        showToast("📸 Generando imagen en alta resolución...");
+
+        try {
+            const canvas = await html2canvas(slideCard, {
+                scale: 2, // 2x para resolución Ultra HD / Retina
+                useCORS: true,
+                allowTaint: true,
+                backgroundColor: "#ffffff",
+                logging: false,
+                imageTimeout: 15000,
+                onclone: (clonedDoc) => {
+                    const clonedCard = clonedDoc.getElementById("slide-master-card");
+                    if (clonedCard) {
+                        clonedCard.style.boxShadow = "none";
+                        clonedCard.style.borderRadius = "0";
+                    }
+                }
+            });
+
+            // Resolver nombre para el archivo
+            const entitySelect = document.getElementById("exec-entity-select");
+            let clientName = "Cliente";
+            if (entitySelect && entitySelect.selectedOptions && entitySelect.selectedOptions[0] && entitySelect.selectedOptions[0].textContent) {
+                clientName = entitySelect.selectedOptions[0].textContent.trim();
+            } else {
+                const titleEl = document.getElementById("s-main-title");
+                if (titleEl && titleEl.textContent) {
+                    clientName = titleEl.textContent.split("—")[0].trim();
+                }
+            }
+            clientName = clientName.replace(/[^a-zA-Z0-9_\sáéíóúÁÉÍÓÚñÑ-]/g, "").replace(/\s+/g, "_");
+
+            const periodEl = document.getElementById("s-main-period");
+            let periodStr = "";
+            if (periodEl && periodEl.textContent) {
+                periodStr = periodEl.textContent.replace("Período:", "").split("·")[0].trim().replace(/[^a-zA-Z0-9_\sáéíóúÁÉÍÓÚñÑ-]/g, "").replace(/\s+/g, "_");
+            }
+
+            const fileName = `Reporte_${clientName}_${periodStr || "Mensual"}.png`;
+
+            // Enlace de descarga automática
+            const dataUrl = canvas.toDataURL("image/png");
+            const link = document.createElement("a");
+            link.download = fileName;
+            link.href = dataUrl;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            showToast("✅ Imagen del reporte descargada con éxito");
+        } catch (err) {
+            console.error("Error al exportar imagen del reporte:", err);
+            showToast("Error al exportar la imagen del reporte");
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+                updateIcons();
+            }
         }
     }
 

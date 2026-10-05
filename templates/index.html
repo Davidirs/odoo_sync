@@ -12,6 +12,8 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Chart.js for Executive Bar Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- html2canvas for High Resolution Image Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -672,6 +674,24 @@
                             <button type="button" class="btn-chip active" id="preset-this-month">Mes Actual</button>
                             <button type="button" class="btn-chip" id="preset-last-30">Últimos 30 días</button>
                             <button type="button" class="btn-chip" id="preset-year-2026">Año 2026</button>
+
+                            <div class="month-selector-wrapper">
+                                <span class="preset-divider"></span>
+                                <label for="exec-month-select" class="preset-label month-select-label">
+                                    <i data-lucide="calendar"></i> Mes:
+                                </label>
+                                <div class="month-nav-controls">
+                                    <button type="button" class="btn-month-step" id="btn-month-prev" title="Mes anterior">
+                                        <i data-lucide="chevron-left"></i>
+                                    </button>
+                                    <select id="exec-month-select" class="custom-month-select" title="Selecciona un mes específico para cargar los datos">
+                                        <!-- Opciones generadas dinámicamente en app.js -->
+                                    </select>
+                                    <button type="button" class="btn-month-step" id="btn-month-next" title="Mes siguiente">
+                                        <i data-lucide="chevron-right"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="exec-btn-cluster">
@@ -686,6 +706,10 @@
                             <button id="btn-exec-print" class="btn-secondary" title="Imprimir o guardar como PDF">
                                 <i data-lucide="printer"></i>
                                 <span>Imprimir / PDF</span>
+                            </button>
+                            <button id="btn-exec-download-img" class="btn-secondary btn-download-img" title="Descargar imagen en alta resolución del reporte">
+                                <i data-lucide="download"></i>
+                                <span>Descargar Imagen</span>
                             </button>
                         </div>
                     </div>
