@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+**/*.egg-info
+.env
+data
+integrations_config.json
+last_ticket_id.txt
+informes_mensuales/.venv
+informes_mensuales/.env
+informes_mensuales/salida

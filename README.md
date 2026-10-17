@@ -16,13 +16,25 @@ Plataforma moderna y optimizada para móviles y desktop para gestionar y monitor
 
 ### 1. Iniciar la Interfaz Web
 ```bash
-python3 app.py
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # incluye informes_mensuales en modo editable
+cp .env.example .env                                                 # y completar
+.venv/bin/python app.py
 ```
 👉 Abre en tu navegador móvil o de escritorio: **[http://localhost:5050](http://localhost:5050)**
 
 ### 2. Iniciar sesión
-- **Usuario:** `ODOO_USER` configurado en tu `.env` o tu correo de Odoo.
-- **Contraseña:** `ODOO_PASSWORD` de Odoo.
+- Cada persona entra con **su usuario y contraseña de Odoo**. Solo usuarios internos (los usuarios portal de clientes no pueden entrar).
+- La app ya no inicia sesión sola con `ODOO_USER`: ese usuario de servicio lo usan el worker de WhatsApp y el informe mensual.
+
+## 📄 Informe mensual por cliente
+
+Pestaña **Informes por Cliente**: un botón por helpdesk de Odoo que genera el informe del mes (Odoo + License Manager + status de Genesys Cloud, redacción con DeepSeek) en **PDF** y **DOCX**, con la revisión automática (semáforo) y los textos editables. El generador es `informes_mensuales/` (ver su README); la parte web está en `informes_web.py` y `static/js/informes.js`.
+
+- **Quién puede:** cualquier usuario interno ve y descarga; generar, editar textos, el shortname y las integraciones solo los correos/usuarios de `INFORMES_USUARIOS`.
+- **Shortname en Genesys Cloud:** la organización de License Manager de cada helpdesk (p. ej. `steren`), con las empresas a excluir (p. ej. Banesco excluye «Banesco USA»). Se guarda en `data/informes_clientes.json` (en Docker, el volumen `/app/data`). Sin shortname se puede generar sin licenciamiento.
+- **Variables:** `DEEPSEEK_API_KEY`, `LM_API_URL`, `LM_USER`, `LM_PASSWORD`, `INFORMES_USUARIOS` (ver `.env.example`).
+- **PDF:** LibreOffice headless actualiza el índice antes de exportar. En local: `brew install --cask libreoffice font-carlito font-liberation`. La imagen Docker ya los instala.
+- Tarda de 1 a 3 minutos por cliente; los informes se generan de uno en uno y el avance se ve en pantalla. Nada se envía al cliente: el borrador lo revisa una persona.
 
 ### 3. Configurar Groq (IA)
 1. Toca el botón ⚙️ **Ajustes** en la barra superior.

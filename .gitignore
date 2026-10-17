@@ -6,3 +6,6 @@ __pycache__/
 *.pyo
 .DS_Store
 data/
+.venv/
+*.egg-info/
+# informes_mensuales/ tiene su propio .gitignore (.env, .venv/, salida/)

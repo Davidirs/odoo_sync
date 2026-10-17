@@ -15,7 +15,9 @@ WORKER_PID=$!
 
 # Iniciar Servidor Web con Gunicorn
 echo "🌐 [Gunicorn] Iniciando servidor web en el puerto ${PORT}..."
-gunicorn -w 2 -b "0.0.0.0:${PORT}" --timeout 120 app:app &
+# Un solo proceso con hilos: las sesiones y los trabajos del informe mensual viven en memoria, y el
+# avance (SSE) mantiene conexiones abiertas mientras se genera.
+gunicorn -w 1 --threads 8 -b "0.0.0.0:${PORT}" --timeout 120 app:app &
 WEB_PID=$!
 
 # Manejador para apagar limpiamente ambos procesos ante SIGTERM o SIGINT

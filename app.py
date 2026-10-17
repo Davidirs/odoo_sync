@@ -1,34 +1,45 @@
 import os
 import json
-import re
 import xmlrpc.client
 import secrets
-import io
-import base64
-import xml.sax.saxutils
 from datetime import timedelta, datetime
-from flask import Flask, render_template, request, jsonify, session, Response, redirect, make_response, send_from_directory, send_file
-from flask_cors import CORS
+from flask import Flask, render_template, request, jsonify, session, redirect, make_response, send_from_directory
 from dotenv import load_dotenv
 import requests
 import groq
 
-try:
-    import docx
-    from docx.shared import Inches, Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.oxml import parse_xml
-    from docx.oxml.ns import nsdecls
-    DOCX_AVAILABLE = True
-except ImportError:
-    DOCX_AVAILABLE = False
-
 load_dotenv()
+
+try:
+    from informes_web import puede_generar, registrar as registrar_informes  # noqa: E402 (después de load_dotenv)
+except ModuleNotFoundError as e:
+    raise SystemExit(
+        f"Falta el módulo '{e.name}' (informe mensual). Arranca con el entorno del proyecto: "
+        ".venv/bin/python app.py — o crea el entorno con: "
+        "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+    ) from e
+
+# Estado persistente: en Docker el volumen /app/data; en local, ./data
+DATA_DIR = "/app/data" if os.path.isdir("/app/data") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def _secret_key():
+    """FLASK_SECRET_KEY o una clave persistida en DATA_DIR, para que las sesiones sobrevivan a reinicios."""
+    if os.environ.get("FLASK_SECRET_KEY"):
+        return os.environ["FLASK_SECRET_KEY"]
+    ruta = os.path.join(DATA_DIR, "flask_secret.txt")
+    if not os.path.exists(ruta):
+        with open(ruta, "w") as f:
+            f.write(secrets.token_hex(32))
+        os.chmod(ruta, 0o600)
+    with open(ruta) as f:
+        return f.read().strip()
+
 
 app = Flask(__name__)
 # Secret key for signing cookies
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
+app.secret_key = _secret_key()
 
 # Enhanced Session Cookie Security
 app.config.update(
@@ -332,36 +343,10 @@ def auth_status():
             "user": sess_data.get("user"),
             "uid": sess_data.get("uid"),
             "name": sess_data.get("name", sess_data.get("user")),
+            "puede_informes": puede_generar(sess_data),
             "db": ODOO_DB,
             "url": ODOO_URL
         })
-    
-    # Auto-login using environment credentials if present
-    if ODOO_USER and ODOO_PASSWORD:
-        try:
-            uid, models = get_odoo_connection(ODOO_USER, ODOO_PASSWORD)
-            if uid:
-                sid = secrets.token_urlsafe(32)
-                session.permanent = True
-                session["sid"] = sid
-                SERVER_SESSIONS[sid] = {
-                    "uid": uid,
-                    "user": ODOO_USER,
-                    "password": ODOO_PASSWORD,
-                    "name": "David I. Reyes S.",
-                    "expires": datetime.utcnow() + timedelta(days=7)
-                }
-                return jsonify({
-                    "authenticated": True,
-                    "user": ODOO_USER,
-                    "uid": uid,
-                    "name": "David I. Reyes S.",
-                    "db": ODOO_DB,
-                    "url": ODOO_URL
-                })
-        except Exception as e:
-            print(f"Auto-auth error: {e}")
-
     return jsonify({"authenticated": False})
 
 
@@ -378,7 +363,7 @@ def login():
     if not uid:
         return jsonify({"success": False, "error": "Credenciales inválidas o error de conexión con Odoo"}), 401
 
-    user_name = username
+    # Solo usuarios internos: Odoo también autentica por XML-RPC a usuarios portal (clientes).
     try:
         user_res = models.execute_kw(
             ODOO_DB,
@@ -387,12 +372,15 @@ def login():
             "res.users",
             "read",
             [[uid]],
-            {"fields": ["name", "email"]}
+            {"fields": ["name", "email", "share"]}
         )
-        if user_res:
-            user_name = user_res[0].get("name", username)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"No se pudo verificar el usuario {uid} en Odoo: {e}")
+        return jsonify({"success": False, "error": "No se pudo verificar el usuario en Odoo"}), 502
+    if not user_res or user_res[0].get("share"):
+        return jsonify({"success": False, "error": "Solo pueden entrar usuarios internos de Odoo"}), 403
+    user_name = user_res[0].get("name") or username
+    user_email = user_res[0].get("email") or ""
 
     # Generate secure random session ID (Server-Side Session)
     sid = secrets.token_urlsafe(32)
@@ -402,6 +390,7 @@ def login():
     SERVER_SESSIONS[sid] = {
         "uid": uid,
         "user": username,
+        "email": user_email,
         "password": password,
         "name": user_name,
         "expires": datetime.utcnow() + timedelta(hours=6)
@@ -411,7 +400,8 @@ def login():
         "success": True,
         "user": username,
         "name": user_name,
-        "uid": uid
+        "uid": uid,
+        "puede_informes": puede_generar(SERVER_SESSIONS[sid])
     })
 
 
@@ -598,6 +588,8 @@ def get_ticket_detail(ticket_id):
 
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
+    if not get_active_server_session():
+        return jsonify({"error": "No autorizado"}), 401
     config = load_integrations_config()
     api_key = config.get("groq_api_key", "")
     masked_key = ""
@@ -616,6 +608,11 @@ def get_settings():
 
 @app.route("/api/settings/groq", methods=["POST"])
 def save_groq_settings():
+    sess_data = get_active_server_session()
+    if not sess_data:
+        return jsonify({"error": "No autorizado"}), 401
+    if not puede_generar(sess_data):
+        return jsonify({"success": False, "error": "Tu usuario no puede cambiar las integraciones (INFORMES_USUARIOS)."}), 403
     data = request.get_json() or {}
     api_key = data.get("api_key", "").strip()
     base_url = data.get("base_url", "").strip()
@@ -640,6 +637,8 @@ def save_groq_settings():
 
 @app.route("/api/settings/groq/test", methods=["POST"])
 def test_groq_connection():
+    if not get_active_server_session():
+        return jsonify({"error": "No autorizado"}), 401
     data = request.get_json() or {}
     api_key = data.get("api_key", "").strip()
     base_url = data.get("base_url", "").strip()
@@ -751,7 +750,8 @@ Genera un reporte técnico claro y profesional con las siguientes secciones:
 
 
 # ==========================================
-# MONTHLY CLIENT REPORTING ENDPOINTS
+# EXECUTIVE REPORT (DIAPOSITIVAS) ENDPOINTS
+# El informe mensual por cliente está en informes_web.py
 # ==========================================
 
 MONTH_NAMES_ES = [
@@ -760,946 +760,14 @@ MONTH_NAMES_ES = [
 ]
 
 
-def strip_html_tags(text):
-    """Clean HTML tags and compress whitespaces."""
-    import re
-    if not text:
-        return ""
-    cleaned = re.sub(r'<[^>]+>', ' ', text)
-    return ' '.join(cleaned.split())
-
-
-@app.route("/api/reports/clients", methods=["GET"])
-def get_report_clients():
-    sess_data = get_active_server_session()
-    if not sess_data:
-        return jsonify({"error": "No autorizado"}), 401
-
-    password = sess_data["password"]
-    uid = sess_data["uid"]
-
-    try:
-        models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object", allow_none=True)
-        teams = models.execute_kw(
-            ODOO_DB,
-            uid,
-            password,
-            "helpdesk.team",
-            "search_read",
-            [[["active", "=", True]]],
-            {"fields": ["id", "name"], "order": "name asc"}
-        )
-        return jsonify({"success": True, "clients": teams})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route("/api/reports/tickets", methods=["GET"])
-def get_monthly_tickets():
-    sess_data = get_active_server_session()
-    if not sess_data:
-        return jsonify({"error": "No autorizado"}), 401
-
-    password = sess_data["password"]
-    uid = sess_data["uid"]
-
-    try:
-        client_id = int(request.args.get("client_id", 0))
-        year = int(request.args.get("year", datetime.now().year))
-        month = int(request.args.get("month", datetime.now().month))
-
-        if not client_id or not (1 <= month <= 12):
-            return jsonify({"success": False, "error": "Parámetros de cliente o mes inválidos"}), 400
-
-        # Calculate month date range
-        start_date = f"{year:04d}-{month:02d}-01 00:00:00"
-        if month == 12:
-            next_start = f"{year+1:04d}-01-01 00:00:00"
-        else:
-            next_start = f"{year:04d}-{month+1:02d}-01 00:00:00"
-
-        models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object", allow_none=True)
-
-        domain = [
-            ("team_id", "=", client_id),
-            ("create_date", ">=", start_date),
-            ("create_date", "<", next_start)
-        ]
-
-        fields = [
-            "id",
-            "name",
-            "partner_id",
-            "stage_id",
-            "create_date",
-            "write_date",
-            "close_date",
-            "total_hours_spent",
-            "description",
-            "message_ids",
-            "tag_ids"
-        ]
-
-        tickets = models.execute_kw(
-            ODOO_DB,
-            uid,
-            password,
-            "helpdesk.ticket",
-            "search_read",
-            [domain],
-            {"fields": fields, "order": "id asc"}
-        )
-
-        # Batch-read all tag names/colors for this set of tickets
-        all_tag_ids_monthly = list({tid for t in tickets for tid in (t.get("tag_ids") or [])})
-        tag_map_monthly = {}
-        if all_tag_ids_monthly:
-            try:
-                tag_records = models.execute_kw(
-                    ODOO_DB, uid, password,
-                    "helpdesk.tag", "read",
-                    [all_tag_ids_monthly],
-                    {"fields": ["id", "name", "color"]}
-                )
-                for tr in tag_records:
-                    tag_map_monthly[tr["id"]] = {"id": tr["id"], "name": tr["name"], "color": tr.get("color", 0)}
-            except Exception as tag_err:
-                print(f"Error reading tags (monthly): {tag_err}")
-
-        type_counts = {}
-        total_hours = 0.0
-        formatted_tickets = []
-
-        total_days_sum = 0
-        stage_counts = {
-            "New": 0,
-            "Work in Progress": 0,
-            "Waiting for Customer": 0,
-            "Waiting for Vendor": 0,
-            "Solved": 0,
-            "Closed": 0,
-            "Archived": 0
-        }
-
-        for t in tickets:
-            ticket_id = t["id"]
-            type_name = resolve_ticket_type(t, tag_map_monthly)
-            type_counts[type_name] = type_counts.get(type_name, 0) + 1
-
-            hours = float(t.get("total_hours_spent") or 0.0)
-            total_hours += hours
-
-            stage_data = t.get("stage_id")
-            stage_name = stage_data[1] if stage_data else "Closed"
-            
-            # Match standard stage counts
-            matched_stage = False
-            for st_k in stage_counts.keys():
-                if st_k.lower() in stage_name.lower():
-                    stage_counts[st_k] += 1
-                    matched_stage = True
-                    break
-            if not matched_stage:
-                stage_counts["Closed"] += 1
-
-            partner_data = t.get("partner_id")
-            client_contact = partner_data[1] if partner_data else "Sin contacto"
-
-            create_date_str = t.get("create_date") or ""
-            end_date_str = t.get("close_date") or t.get("write_date") or create_date_str
-
-            # Calculate calendar days
-            days_spent = 1
-            if create_date_str and end_date_str:
-                try:
-                    c_dt = datetime.strptime(create_date_str, "%Y-%m-%d %H:%M:%S")
-                    e_dt = datetime.strptime(end_date_str, "%Y-%m-%d %H:%M:%S")
-                    days_spent = max(1, round((e_dt - c_dt).total_seconds() / 86400))
-                except Exception:
-                    days_spent = 1
-            total_days_sum += days_spent
-
-            desc_clean = strip_html_tags(t.get("description", ""))
-
-            # Extract real human conversation messages (comments and emails, exclude notifications, internal notes and bots)
-            recent_notes = []
-            try:
-                msgs = models.execute_kw(
-                    ODOO_DB,
-                    uid,
-                    password,
-                    "mail.message",
-                    "search_read",
-                    [[
-                        ["res_id", "=", ticket_id],
-                        ["model", "=", "helpdesk.ticket"],
-                        ["message_type", "in", ["comment", "email"]]
-                    ]],
-                    {"fields": ["author_id", "body", "date", "subtype_id"], "order": "id asc", "limit": 20}
-                )
-
-                for m in msgs:
-                    # Skip internal log notes (subtype Note/Nota)
-                    subtype_data = m.get("subtype_id")
-                    subtype_name = (subtype_data[1] if subtype_data else "").lower()
-                    if "nota" in subtype_name or "note" in subtype_name:
-                        continue
-
-                    b = strip_html_tags(m.get("body", ""))
-                    author = m.get("author_id", ["", ""])[1] if m.get("author_id") else "Sistema"
-
-                    # Skip bot auto-replies or empty text
-                    if not b or "OdooBot" in author or "Archivos adjuntos" in b or len(b) < 6:
-                        continue
-
-                    # Clean email reply headers like "El vie, 28 ago... escribió:" or "On ... wrote:"
-                    clean_b = re.split(r'El \w+,\s+\d+.*|On \w+,\s+\d+.*|<div data-o-mail-quote|--|Atentamente|Saludos cordiales', b, flags=re.IGNORECASE)[0].strip()
-                    clean_b = clean_b.split("Ver documento")[0].split("Descargar")[0].strip()
-
-                    if clean_b and len(clean_b) > 4:
-                        recent_notes.append(f"{author}: {clean_b[:220]}")
-            except Exception as msg_err:
-                print(f"Error fetching chatter for ticket {ticket_id}: {msg_err}")
-
-            odoo_url = f"{ODOO_URL}/web#id={ticket_id}&cids=1&menu_id=352&action=475&model=helpdesk.ticket&view_type=form"
-
-            ticket_tags = [tag_map_monthly[tid] for tid in (t.get("tag_ids") or []) if tid in tag_map_monthly]
-
-            formatted_tickets.append({
-                "id": ticket_id,
-                "name": t.get("name") or "(Sin Asunto)",
-                "type": type_name,
-                "stage": stage_name,
-                "contact": client_contact,
-                "create_date": create_date_str,
-                "end_date": end_date_str,
-                "days_spent": days_spent,
-                "hours_spent": hours,
-                "description": desc_clean[:250],
-                "notes": recent_notes[-3:], # Only top 3 clean messages
-                "tags": ticket_tags,
-                "odoo_url": odoo_url
-            })
-
-        month_label = f"{MONTH_NAMES_ES[month]} de {year}"
-        avg_days = round(total_days_sum / len(formatted_tickets)) if formatted_tickets else 0
-
-        return jsonify({
-            "success": True,
-            "period": month_label,
-            "month_name": MONTH_NAMES_ES[month],
-            "year": year,
-            "month": month,
-            "total_tickets": len(formatted_tickets),
-            "total_hours": round(total_hours, 2),
-            "avg_days": avg_days,
-            "stage_counts": stage_counts,
-            "type_counts": type_counts,
-            "tickets": formatted_tickets
-        })
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route("/api/reports/generate-ai-report", methods=["POST"])
-def generate_monthly_ai_report():
-    sess_data = get_active_server_session()
-    if not sess_data:
-        return jsonify({"error": "No autorizado"}), 401
-
-    config = load_integrations_config()
-    api_key = config.get("groq_api_key")
-    base_url = config.get("groq_base_url")
-    model = config.get("groq_model", "openai/gpt-oss-120b")
-    if not api_key:
-        return jsonify({
-            "success": False,
-            "error": "Groq / DeepSeek IA no está configurado. Ve a Ajustes > Integraciones para ingresar tu API Key."
-        }), 400
-
-    data = request.get_json() or {}
-    client_name = data.get("client_name", "Cliente")
-    period_label = data.get("period_label", "este mes")
-    tickets = data.get("tickets") or []
-
-    if not tickets:
-        return jsonify({"success": False, "error": "No hay tickets para generar el resumen."}), 400
-
-    # Build tickets payload for Groq / DeepSeek
-    type_counts = {}
-    tickets_prompt_list = []
-    for idx, t in enumerate(tickets, 1):
-        ttype = t.get("type", "Requerimiento")
-        type_counts[ttype] = type_counts.get(ttype, 0) + 1
-        
-        notes_str = "\n   - ".join(t.get("notes") or []) if t.get("notes") else "Sin notas adicionales."
-        desc_str = t.get("description") or "Sin descripción provista."
-        
-        tickets_prompt_list.append(
-            f"{idx}. #{t['id']} - {t['name']} (Tipo: {ttype})\n"
-            f"   Descripción: {desc_str[:300]}\n"
-            f"   Notas/Logs de Resolución:\n   - {notes_str}"
-        )
-
-    # Breakdown text helper
-    type_breakdown_parts = [f"{cnt} de ellos como {k.lower()}" if idx == 0 else f"{cnt} como {k.lower()}" for idx, (k, cnt) in enumerate(type_counts.items())]
-    type_breakdown_str = ", ".join(type_breakdown_parts)
-
-    prompt = f"""
-Eres un redactor técnico senior de informes ejecutivos de soporte TI para clientes corporativos.
-Genera la sección '1. RESUMEN DE SOPORTE' mensual para el cliente '{client_name}' del período '{period_label}'.
-
-Datos estadísticos:
-- Total casos aperturados en el mes: {len(tickets)}
-- Desglose por tipo: {type_breakdown_str}
-
-Casos registrados en Odoo con sus logs y notas de resolución:
-{chr(10).join(tickets_prompt_list)}
-
-Instrucciones estrictas:
-1. 'section_header': Debe ser '1. RESUMEN DE SOPORTE'
-2. 'intro': Un párrafo con el estilo: 'Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:'
-3. 'tickets': Una lista ordenada donde para CADA ticket devuelves:
-   - 'id': número de ID
-   - 'title': título exacto del caso
-   - 'summary': 1 o 2 párrafos ejecutivos, claros, en español neutro profesional, explicando exactamente la acción realizada o cómo quedó solucionado el caso según las notas y logs del ticket.
-
-Responde ÚNICAMENTE en formato JSON válido con esta estructura:
-{{
-  "section_header": "1. RESUMEN DE SOPORTE",
-  "intro": "Durante el mes de...",
-  "tickets": [
-    {{
-      "id": 11239,
-      "title": "Creación de Accesos SocialHub",
-      "summary": "Habilitación de los usuarios solicitados..."
-    }}
-  ]
-}}
-"""
-
-    # Check if client requested streaming SSE
-    is_stream = request.args.get("stream", "false").lower() in ("true", "1")
-
-    if not is_stream:
-        # Regular JSON response (backward compatibility)
-        try:
-            BATCH_SIZE = 15
-            all_summaries = []
-            intro_prompt = f"""
-Genera únicamente la introducción ejecutiva del reporte de soporte para {client_name} del período {period_label}.
-Datos:
-- Total casos aperturados en el mes: {len(tickets)}
-- Desglose por tipo: {type_breakdown_str}
-
-Responde ÚNICAMENTE en JSON con formato:
-{{"intro": "Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"}}
-"""
-            intro_raw = perform_ai_completion(
-                api_key=api_key,
-                base_url=base_url,
-                model=model,
-                messages=[
-                    {"role": "system", "content": "Eres un asistente experto que responde estrictamente en JSON válido."},
-                    {"role": "user", "content": intro_prompt}
-                ],
-                temperature=0.2,
-                max_tokens=600,
-                response_format={"type": "json_object"}
-            )
-            try:
-                intro_clean = intro_raw.strip()
-                s_i = intro_clean.find("{")
-                e_i = intro_clean.rfind("}")
-                if s_i != -1 and e_i != -1:
-                    intro_clean = intro_clean[s_i:e_i+1]
-                intro_text = json.loads(intro_clean).get("intro", f"Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:")
-            except Exception:
-                intro_text = f"Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"
-
-            for i in range(0, len(tickets), BATCH_SIZE):
-                chunk = tickets[i:i + BATCH_SIZE]
-                chunk_prompt_list = []
-                for c_idx, t in enumerate(chunk, i + 1):
-                    ttype = t.get("type", "Requerimiento")
-                    notes_str = "\n   - ".join(t.get("notes") or []) if t.get("notes") else "Sin notas adicionales."
-                    desc_str = (t.get("description") or "Sin descripción provista.")[:200]
-                    chunk_prompt_list.append(
-                        f"{c_idx}. #{t['id']} - {t['name']} (Tipo: {ttype})\n"
-                        f"   Descripción: {desc_str}\n"
-                        f"   Notas/Logs: {notes_str[:300]}"
-                    )
-
-                batch_prompt = f"""
-Genera el resumen de resolución de estos {len(chunk)} casos de soporte para {client_name}:
-{chr(10).join(chunk_prompt_list)}
-
-Para CADA ticket redacta 'summary' (1 o 2 líneas ejecutivas explicando la resolución según las notas/logs).
-Responde ÚNICAMENTE en JSON con formato:
-{{
-  "tickets": [
-    {{
-      "id": {chunk[0]['id']},
-      "title": "{chunk[0]['name'].replace('"', '')[:50]}",
-      "summary": "Resumen claro y profesional..."
-    }}
-  ]
-}}
-"""
-                batch_raw = perform_ai_completion(
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "Eres un redactor técnico que responde estrictamente en JSON válido con la lista 'tickets'."},
-                        {"role": "user", "content": batch_prompt}
-                    ],
-                    temperature=0.2,
-                    max_tokens=2500,
-                    response_format={"type": "json_object"}
-                )
-
-                b_clean = batch_raw.strip()
-                s_idx = b_clean.find("{")
-                e_idx = b_clean.rfind("}")
-                if s_idx != -1 and e_idx != -1:
-                    b_clean = b_clean[s_idx:e_idx+1]
-                batch_data = json.loads(b_clean)
-                all_summaries.extend(batch_data.get("tickets", []))
-
-            return jsonify({
-                "success": True,
-                "report": {
-                    "section_header": "1. RESUMEN DE SOPORTE",
-                    "intro": intro_text,
-                    "tickets": all_summaries
-                },
-                "model_used": model
-            })
-        except Exception as e:
-            return jsonify({"success": False, "error": f"Error al generar informe con IA: {str(e)}"}), 500
-
-    # STREAMING SSE MODE
-    def generate_events():
-        try:
-            BATCH_SIZE = 15
-            total_batches = (len(tickets) + BATCH_SIZE - 1) // BATCH_SIZE
-
-            # Event 1: Starting
-            yield f"data: {json.dumps({'type': 'start', 'total_tickets': len(tickets), 'total_batches': total_batches})}\n\n"
-
-            # 1. Generate Intro
-            yield f"data: {json.dumps({'type': 'step', 'message': 'Redactando introducción ejecutiva...', 'progress': 5})}\n\n"
-            intro_prompt = f"""
-Genera únicamente la introducción ejecutiva del reporte de soporte para {client_name} del período {period_label}.
-Datos:
-- Total casos aperturados en el mes: {len(tickets)}
-- Desglose por tipo: {type_breakdown_str}
-
-Responde ÚNICAMENTE en JSON con formato:
-{{"intro": "Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"}}
-"""
-            intro_text = f"Durante el mes de {period_label} se aperturaron {len(tickets)} casos para {client_name}, {type_breakdown_str}, un breve resumen de ellos es el siguiente:"
-            try:
-                intro_raw = perform_ai_completion(
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "Eres un asistente experto que responde estrictamente en JSON válido."},
-                        {"role": "user", "content": intro_prompt}
-                    ],
-                    temperature=0.2,
-                    max_tokens=600,
-                    response_format={"type": "json_object"}
-                )
-                intro_clean = intro_raw.strip()
-                s_i = intro_clean.find("{")
-                e_i = intro_clean.rfind("}")
-                if s_i != -1 and e_i != -1:
-                    intro_clean = intro_clean[s_i:e_i+1]
-                intro_text = json.loads(intro_clean).get("intro", intro_text)
-            except Exception:
-                pass
-
-            yield f"data: {json.dumps({'type': 'intro', 'intro': intro_text, 'progress': 15})}\n\n"
-
-            # 2. Process in chunks and stream items as they finish
-            processed_count = 0
-            for batch_num, i in enumerate(range(0, len(tickets), BATCH_SIZE), 1):
-                chunk = tickets[i:i + BATCH_SIZE]
-                chunk_prompt_list = []
-                for c_idx, t in enumerate(chunk, i + 1):
-                    ttype = t.get("type", "Requerimiento")
-                    notes_str = "\n   - ".join(t.get("notes") or []) if t.get("notes") else "Sin notas adicionales."
-                    desc_str = (t.get("description") or "Sin descripción provista.")[:200]
-                    chunk_prompt_list.append(
-                        f"{c_idx}. #{t['id']} - {t['name']} (Tipo: {ttype})\n"
-                        f"   Descripción: {desc_str}\n"
-                        f"   Notas/Logs: {notes_str[:300]}"
-                    )
-                first_id = chunk[0].get("id")
-                last_id = chunk[-1].get("id")
-                step_msg = f"Analizando bloque {batch_num}/{total_batches} (tickets #{first_id} a #{last_id})..."
-                step_pct = 15 + int((batch_num - 1) / total_batches * 80)
-                yield f"data: {json.dumps({'type': 'step', 'message': step_msg, 'progress': step_pct})}\n\n"
-
-                batch_prompt = f"""
-Actúa como un consultor senior de soporte técnico redactando el informe mensual ejecutivo para {client_name}.
-Analiza la solicitud y mensajes de resolución de cada uno de los siguientes {len(chunk)} casos:
-
-{chr(10).join(chunk_prompt_list)}
-
-INSTRUCCIÓN DE REDACCIÓN PARA CADA CASO:
-- En 'summary' redacta un resumen ejecutivo en tiempo pasado (1 o 2 oraciones, estilo corporativo) que explique QUÉ SE SOLICITÓ y QUÉ SE HIZO o resolvió.
-- NUNCA incluyas saludos informales ("hola", "saludos", "buenas"), ni nombres de personas, ni firmas de correos.
-- Ejemplos del estilo esperado:
-  * "Se habilitó el campo de Flows en la plataforma para la medición del BO tras la configuración técnica y confirmación del cliente."
-  * "La cuenta de WhatsApp fue vinculada y los usuarios correspondientes quedaron activados en la plataforma SocialHub."
-  * "Se atendió el requerimiento configurando los parámetros solicitados y validando el funcionamiento en el ambiente del cliente."
-
-Responde ÚNICAMENTE en JSON con formato:
-{{
-  "tickets": [
-    {{
-      "id": {chunk[0]['id']},
-      "title": "{chunk[0]['name'].replace('"', '')[:50]}",
-      "summary": "Explicación clara de lo realizado o configurado..."
-    }}
-  ]
-}}
-"""
-                batch_raw = perform_ai_completion(
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "Eres un redactor técnico de soporte senior que redacta resúmenes ejecutivos en JSON estricto."},
-                        {"role": "user", "content": batch_prompt}
-                    ],
-                    temperature=0.2,
-                    max_tokens=2500,
-                    response_format={"type": "json_object"}
-                )
-
-                batch_items = []
-                try:
-                    b_clean = batch_raw.strip()
-                    s_idx = b_clean.find("{")
-                    e_idx = b_clean.rfind("}")
-                    if s_idx != -1 and e_idx != -1:
-                        b_clean = b_clean[s_idx:e_idx+1]
-                    batch_data = json.loads(b_clean)
-
-                    # Check multiple common key names (tickets, casos, items, data)
-                    for possible_key in ["tickets", "casos", "items", "data", "resumenes"]:
-                        if isinstance(batch_data.get(possible_key), list) and batch_data.get(possible_key):
-                            batch_items = batch_data[possible_key]
-                            break
-
-                    # If model returned a direct list
-                    if not batch_items and isinstance(batch_data, list):
-                        batch_items = batch_data
-                except Exception as parse_err:
-                    print(f"⚠️ Error parseando batch JSON: {parse_err}. Creando resúmenes estructurados de respaldo...")
-
-                # Ensure EVERY ticket in the chunk has an entry with valid id, title and executive summary
-                final_batch_items = []
-                for t in chunk:
-                    t_id = t.get("id")
-                    matched = next((item for item in batch_items if str(item.get("id")) == str(t_id)), None)
-                    
-                    if matched and matched.get("summary") and len(matched.get("summary")) > 15 and not matched.get("summary").lower().startswith("hola"):
-                        final_batch_items.append({
-                            "id": t_id,
-                            "title": matched.get("title") or t.get("name") or f"Caso #{t_id}",
-                            "summary": matched.get("summary")
-                        })
-                    else:
-                        # Clean synthesis from ticket description
-                        desc = (t.get("description") or "").strip()
-                        t_name = t.get("name") or "Requerimiento"
-                        if desc and len(desc) > 10 and not desc.lower().startswith("hola"):
-                            clean_desc = desc[:160].rstrip(".")
-                            fallback_summary = f"Se gestionó la solicitud ({clean_desc}), completando la atención y validación correspondiente."
-                        else:
-                            fallback_summary = f"Se atendió y resolvió el requerimiento de {t_name} conforme a lo acordado con el cliente."
-
-                        final_batch_items.append({
-                            "id": t_id,
-                            "title": t.get("name") or f"Caso #{t_id}",
-                            "summary": fallback_summary
-                        })
-
-                processed_count += len(final_batch_items)
-
-                # Stream these tickets to UI immediately
-                pct = 15 + int((batch_num / total_batches) * 80)
-                yield f"data: {json.dumps({'type': 'batch_tickets', 'items': final_batch_items, 'processed': processed_count, 'total': len(tickets), 'progress': pct})}\n\n"
-
-            # Event: Finished
-            yield f"data: {json.dumps({'type': 'done', 'progress': 100, 'message': 'Informe completado exitosamente'})}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
-
-    return Response(generate_events(), mimetype="text/event-stream")
-
-
-@app.route("/api/reports/regenerate-single-summary", methods=["POST"])
-def regenerate_single_summary():
-    sess_data = get_active_server_session()
-    if not sess_data:
-        return jsonify({"error": "No autorizado"}), 401
-
-    config = load_integrations_config()
-    api_key = config.get("groq_api_key")
-    base_url = config.get("groq_base_url")
-    if not api_key:
-        return jsonify({"success": False, "error": "La IA no está configurada."}), 400
-
-    data = request.get_json() or {}
-    ticket = data.get("ticket") or {}
-
-    notes_str = "\n- ".join(ticket.get("notes") or [])
-    desc_str = ticket.get("description") or ""
-
-    prompt = f"""
-Sintetiza en un párrafo profesional (1 a 3 líneas) la resolución y actividades realizadas para el siguiente caso de soporte:
-Caso: #{ticket.get('id')} - {ticket.get('name')} (Tipo: {ticket.get('type')})
-Descripción: {desc_str[:400]}
-Notas/Logs de resolución:
-- {notes_str}
-
-Responde ÚNICAMENTE con el párrafo del resumen en español neutro sin introducciones ni asteriscos.
-"""
-
-    model = config.get("groq_model", "openai/gpt-oss-120b")
-    try:
-        summary = perform_ai_completion(
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            messages=[
-                {"role": "system", "content": "Eres un redactor técnico que resume casos en 1 párrafo claro."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=300
-        )
-        return jsonify({"success": True, "summary": summary.strip()})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-def build_monthly_report_docx(data):
-    """Generates an executive, beautifully styled Microsoft Word (.docx) document matching the ESMT format."""
-    if not DOCX_AVAILABLE:
-        raise RuntimeError("python-docx is not installed.")
-
-    doc = docx.Document()
-
-    # 1-inch standard executive margins
-    for sec in doc.sections:
-        sec.top_margin = Inches(0.8)
-        sec.bottom_margin = Inches(0.8)
-        sec.left_margin = Inches(1.0)
-        sec.right_margin = Inches(1.0)
-
-    def add_banner(title_text):
-        tbl = doc.add_table(rows=1, cols=1)
-        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-        tbl.autofit = False
-        cell = tbl.cell(0, 0)
-        cell.width = Inches(6.5)
-        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="EA580C"/>')
-        cell._tc.get_or_add_tcPr().append(shd)
-        tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="140" w:type="dxa"/><w:bottom w:w="140" w:type="dxa"/><w:left w:w="180" w:type="dxa"/><w:right w:w="180" w:type="dxa"/></w:tcMar>')
-        cell._tc.get_or_add_tcPr().append(tcMar)
-        p = cell.paragraphs[0]
-        p.paragraph_format.space_before = Pt(2)
-        p.paragraph_format.space_after = Pt(2)
-        run = p.add_run(title_text)
-        run.font.name = 'Calibri'
-        run.font.size = Pt(12)
-        run.font.bold = True
-        run.font.color.rgb = RGBColor(255, 255, 255)
-
-        p_spacer = doc.add_paragraph()
-        p_spacer.paragraph_format.space_before = Pt(0)
-        p_spacer.paragraph_format.space_after = Pt(4)
-
-    def add_subheading(sub_title):
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(14)
-        p.paragraph_format.space_after = Pt(4)
-        run = p.add_run(sub_title)
-        run.font.name = 'Calibri'
-        run.font.size = Pt(12)
-        run.font.bold = True
-        run.font.color.rgb = RGBColor(234, 88, 12)
-
-    def add_intro(intro_text):
-        if not intro_text:
-            return
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(2)
-        p.paragraph_format.space_after = Pt(10)
-        p.paragraph_format.line_spacing = 1.15
-        run = p.add_run(intro_text)
-        run.font.name = 'Calibri'
-        run.font.size = Pt(10.5)
-        run.font.color.rgb = RGBColor(51, 51, 51)
-
-    def add_hyperlink(paragraph, url, text, color="EA580C", bold=True):
-        if not url or url == "#" or not str(url).startswith("http"):
-            run = paragraph.add_run(text)
-            run.font.name = 'Calibri'
-            run.font.bold = bold
-            run.font.color.rgb = RGBColor(234, 88, 12)
-            run.font.size = Pt(11)
-            return
-        try:
-            part = paragraph.part
-            r_id = part.relate_to(url, docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
-            hyperlink = parse_xml(f'<w:hyperlink {nsdecls("w", "r")} r:id="{r_id}"/>')
-            escaped_text = xml.sax.saxutils.escape(text)
-            new_run = parse_xml(f'<w:r {nsdecls("w")}><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:color w:val="{color}"/><w:b/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">{escaped_text}</w:t></w:r>')
-            hyperlink.append(new_run)
-            paragraph._p.append(hyperlink)
-        except Exception:
-            run = paragraph.add_run(text)
-            run.font.name = 'Calibri'
-            run.font.bold = bold
-            run.font.color.rgb = RGBColor(234, 88, 12)
-            run.font.size = Pt(11)
-
-    def add_table(headers, rows, col_widths=None, total_row=None, col_alignments=None):
-        col_count = len(headers)
-        tbl = doc.add_table(rows=0, cols=col_count)
-        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-        tbl.autofit = False
-        tblPr = tbl._tbl.tblPr
-        borders = parse_xml(
-            f'<w:tblBorders {nsdecls("w")}>'
-            f'<w:top w:val="single" w:sz="4" w:space="0" w:color="FED7AA"/>'
-            f'<w:bottom w:val="single" w:sz="8" w:space="0" w:color="EA580C"/>'
-            f'<w:left w:val="none"/>'
-            f'<w:right w:val="none"/>'
-            f'<w:insideH w:val="single" w:sz="4" w:space="0" w:color="FED7AA"/>'
-            f'<w:insideV w:val="none"/>'
-            f'</w:tblBorders>'
-        )
-        tblPr.append(borders)
-
-        # Header
-        hdr_row = tbl.add_row()
-        trPr = hdr_row._tr.get_or_add_trPr()
-        trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
-        trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
-        for i, title in enumerate(headers):
-            cell = hdr_row.cells[i]
-            if col_widths and i < len(col_widths):
-                cell.width = col_widths[i]
-            shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="EA580C"/>')
-            cell._tc.get_or_add_tcPr().append(shd)
-            tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="120" w:type="dxa"/><w:bottom w:w="120" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>')
-            cell._tc.get_or_add_tcPr().append(tcMar)
-            p = cell.paragraphs[0]
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(0)
-            if col_alignments and i < len(col_alignments):
-                p.alignment = col_alignments[i]
-            run = p.add_run(str(title))
-            run.font.name = 'Calibri'
-            run.font.size = Pt(10)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 255, 255)
-
-        # Rows
-        for r_idx, row_data in enumerate(rows):
-            row = tbl.add_row()
-            trPr = row._tr.get_or_add_trPr()
-            trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
-            bg_color = 'FFFAF5' if (r_idx % 2 == 1) else 'FFFFFF'
-            for i, val in enumerate(row_data):
-                cell = row.cells[i]
-                if col_widths and i < len(col_widths):
-                    cell.width = col_widths[i]
-                if bg_color != 'FFFFFF':
-                    shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{bg_color}"/>')
-                    cell._tc.get_or_add_tcPr().append(shd)
-                tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>')
-                cell._tc.get_or_add_tcPr().append(tcMar)
-                p = cell.paragraphs[0]
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                if col_alignments and i < len(col_alignments):
-                    p.alignment = col_alignments[i]
-                run = p.add_run(str(val))
-                run.font.name = 'Calibri'
-                run.font.size = Pt(9.5)
-                run.font.color.rgb = RGBColor(51, 51, 51)
-
-        # Total / Footer Row
-        if total_row:
-            row = tbl.add_row()
-            trPr = row._tr.get_or_add_trPr()
-            trPr.append(parse_xml(f'<w:cantSplit {nsdecls("w")}/>'))
-            for i, val in enumerate(total_row):
-                cell = row.cells[i]
-                if col_widths and i < len(col_widths):
-                    cell.width = col_widths[i]
-                shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="FFF7ED"/>')
-                cell._tc.get_or_add_tcPr().append(shd)
-                tcMar = parse_xml(f'<w:tcMar {nsdecls("w")}><w:top w:w="100" w:type="dxa"/><w:bottom w:w="100" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>')
-                cell._tc.get_or_add_tcPr().append(tcMar)
-                p = cell.paragraphs[0]
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                if col_alignments and i < len(col_alignments):
-                    p.alignment = col_alignments[i]
-                run = p.add_run(str(val))
-                run.font.name = 'Calibri'
-                run.font.size = Pt(10)
-                run.font.bold = True
-                run.font.color.rgb = RGBColor(15, 23, 42)
-
-        p_after = doc.add_paragraph()
-        p_after.paragraph_format.space_before = Pt(0)
-        p_after.paragraph_format.space_after = Pt(8)
-
-    def add_chart_image(img_b64):
-        if not img_b64 or not str(img_b64).startswith('data:image'):
-            return
-        try:
-            _, encoded = str(img_b64).split(',', 1)
-            img_bytes = base64.b64decode(encoded)
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p.paragraph_format.space_before = Pt(6)
-            p.paragraph_format.space_after = Pt(12)
-            run = p.add_run()
-            run.add_picture(io.BytesIO(img_bytes), width=Inches(5.5))
-        except Exception as e:
-            print(f"Could not embed chart image in docx: {e}")
-
-    # ================= 1. RESUMEN DE SOPORTE =================
-    sec1 = data.get('section1', {})
-    add_banner(sec1.get('header', '1.   RESUMEN DE SOPORTE'))
-    add_intro(sec1.get('intro', ''))
-    for item in sec1.get('items', []):
-        p_t = doc.add_paragraph()
-        p_t.paragraph_format.space_before = Pt(8)
-        p_t.paragraph_format.space_after = Pt(2)
-        raw_title = item.get('title', '').strip()
-        ticket_id = item.get('id', '')
-        title_text = f"{raw_title} (#{ticket_id})" if (ticket_id and f"#{ticket_id}" not in raw_title) else raw_title
-        add_hyperlink(p_t, item.get('url', ''), title_text)
-
-        p_d = doc.add_paragraph()
-        p_d.paragraph_format.space_before = Pt(0)
-        p_d.paragraph_format.space_after = Pt(10)
-        p_d.paragraph_format.line_spacing = 1.15
-        run_d = p_d.add_run(item.get('summary', ''))
-        run_d.font.name = 'Calibri'
-        run_d.font.size = Pt(10)
-        run_d.font.color.rgb = RGBColor(51, 51, 51)
-
-    # ================= 2. VOLUMEN DE CASOS =================
-    sec2 = data.get('section2')
-    if sec2 and sec2.get('rows'):
-        add_banner(sec2.get('header', '2.   VOLUMEN DE CASOS'))
-        add_intro(sec2.get('intro', ''))
-        widths = [Inches(4.5), Inches(2.0)]
-        aligns = [WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER]
-        tot = ['Total', str(sec2.get('total', '0'))]
-        add_table(sec2.get('headers', ['Tipo de caso', 'Cantidad']), sec2.get('rows', []), widths, tot, aligns)
-        if sec2.get('chart_image'):
-            add_chart_image(sec2.get('chart_image'))
-
-    # ================= 3. TIEMPO PROMEDIO =================
-    sec3 = data.get('section3')
-    if sec3 and sec3.get('rows'):
-        add_subheading(sec3.get('header', 'TIEMPO PROMEDIO'))
-        add_intro(sec3.get('intro', ''))
-        widths = [Inches(0.8), Inches(2.7), Inches(1.1), Inches(1.1), Inches(0.8)]
-        aligns = [WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.CENTER]
-        tot = ['', '', '', 'Días Promedio', str(sec3.get('average', '0'))]
-        add_table(sec3.get('headers', ['ID', 'Asunto', 'Creado el', 'Última actualización', 'Días']), sec3.get('rows', []), widths, tot, aligns)
-
-    # ================= 4. HISTORIAL DE HORAS =================
-    sec4 = data.get('section4')
-    if sec4 and sec4.get('rows'):
-        add_subheading(sec4.get('header', 'HISTORIAL DE HORAS'))
-        add_intro(sec4.get('intro', ''))
-        widths = [Inches(0.8), Inches(3.4), Inches(1.3), Inches(1.0)]
-        aligns = [WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.CENTER]
-        tot = ['', '', 'Total de horas', str(sec4.get('total', '0.00'))]
-        add_table(sec4.get('headers', ['ID', 'Asunto', 'Estado', 'Horas']), sec4.get('rows', []), widths, tot, aligns)
-
-    # ================= 5. ESTADO DE LOS TICKETS =================
-    sec5 = data.get('section5')
-    if sec5 and sec5.get('rows'):
-        add_subheading(sec5.get('header', 'ESTADO DE LOS TICKETS'))
-        add_intro(sec5.get('intro', ''))
-        widths = [Inches(4.5), Inches(2.0)]
-        aligns = [WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER]
-        tot = ['Total', str(sec5.get('total', '0'))]
-        add_table(sec5.get('headers', ['Estado', 'Cantidad']), sec5.get('rows', []), widths, tot, aligns)
-        if sec5.get('chart_image'):
-            add_chart_image(sec5.get('chart_image'))
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf.getvalue()
-
-
-@app.route("/api/reports/export-docx", methods=["POST"])
-def export_monthly_report_docx():
-    """Generates and downloads a native editable Word (.docx) report."""
-    if not DOCX_AVAILABLE:
-        return jsonify({"success": False, "error": "La librería python-docx no está disponible en el entorno."}), 500
-
-    data = request.get_json() or {}
-    client_name = (data.get("client_name") or "Cliente").strip()
-    period = (data.get("period") or "Periodo").strip()
-
-    try:
-        docx_bytes = build_monthly_report_docx(data)
-        safe_client = re.sub(r'[^a-zA-Z0-9_\-]', '_', client_name)
-        safe_period = re.sub(r'[^a-zA-Z0-9_\-]', '_', period)
-        filename = f"Informe_Soporte_{safe_client}_{safe_period}.docx"
-
-        return send_file(
-            io.BytesIO(docx_bytes),
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            as_attachment=True,
-            download_name=filename
-        )
-    except Exception as e:
-        print(f"Error generando documento Word: {e}")
-        return jsonify({"success": False, "error": f"Error al generar el documento de Word: {str(e)}"}), 500
-
-
 def get_auth_connection():
-    """Returns (uid, password, models, user_name) from session or fallback to env credentials."""
+    """Returns (uid, password, models, user_name) from the logged-in session (no env fallback)."""
     sess_data = get_active_server_session()
     if sess_data:
         uid = sess_data["uid"]
         pwd = sess_data["password"]
         models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object", allow_none=True)
         return uid, pwd, models, sess_data.get("name", "Usuario")
-    
-    # Fallback to env
-    env_user = os.environ.get("ODOO_USER")
-    env_pwd = os.environ.get("ODOO_PASSWORD")
-    if env_user and env_pwd:
-        uid, models = get_odoo_connection(env_user, env_pwd)
-        if uid:
-            return uid, env_pwd, models, env_user
     return None, None, None, None
 
 
@@ -2163,6 +1231,9 @@ def get_team_logo(team_id):
 def get_esmt_logo():
     """Serve official ESMT logo directly as PNG."""
     return send_from_directory(os.path.join(app.root_path, "static", "img"), "company_logo.png", mimetype="image/png")
+
+
+registrar_informes(app, get_active_server_session, DATA_DIR)
 
 
 if __name__ == "__main__":

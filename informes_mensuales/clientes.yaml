@@ -1,0 +1,37 @@
+# Relación de cada cliente con sus sistemas.
+# Cuando se apruebe el flujo, conviene mover estos campos a helpdesk.team en Odoo
+# (como ya existe x_studio_logo) para que dar de alta un cliente no requiera tocar archivos.
+
+empresa:
+  nombre: Grupo ESMT
+  preparado_por: Support Team
+
+clientes:
+  - codigo: STEREN                 # identificador corto (carpeta y nombre de archivo)
+    nombre: Steren                 # cómo aparece en el texto del informe
+    odoo_team_id: 79               # helpdesk.team en Odoo
+    genesys_org: steren            # orgname en LicenseManager
+    # Región de Genesys Cloud para disponibilidad e incidentes.
+    # Si se deja vacía se usa la región que devuelve LicenseManager.
+    region_genesys: ""
+    # Logo de respaldo si el helpdesk no tiene x_studio_logo en Odoo.
+    logo: logos/steren.png
+    activo: true
+
+  - codigo: BANESCO
+    nombre: Banesco
+    odoo_team_id: 78
+    genesys_org: banescopam
+    region_genesys: ""
+    logo: ""                       # el helpdesk ya tiene logo en Odoo
+    # El helpdesk Banesco también recibe tickets de Banesco USA; no van en el informe de Panamá.
+    excluir_empresas: ["Banesco USA"]
+    activo: true
+
+  - codigo: TECNISCAN
+    nombre: TecniScan
+    odoo_team_id: 84               # helpdesk "Tecniscan" en Odoo
+    genesys_org: tecniscan
+    region_genesys: ""
+    logo: ""                       # el helpdesk ya tiene logo en Odoo
+    activo: true

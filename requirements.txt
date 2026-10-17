@@ -4,4 +4,11 @@ Flask==2.3.3
 Flask-Cors==3.0.10
 groq==1.0.0
 gunicorn==23.0.0
+# Informe mensual: el generador vive en informes_mensuales/ y se instala en modo editable
+# (lee su plantilla y logos desde esa carpeta). Sus dependencias, explícitas aquí:
 python-docx>=1.1.0
+docxtpl>=0.19
+matplotlib>=3.9
+pyyaml>=6.0
+Pillow>=10
+-e ./informes_mensuales
