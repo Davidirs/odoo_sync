@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 
 import requests
 
+from .license_manager import estado_recurso
+
 INSTRUCCIONES = """\
 Redactas las partes narrativas del informe mensual que Grupo ESMT entrega a sus clientes de Genesys Cloud.
 Lo lee el responsable del contact center del cliente: tono profesional y claro, español neutro, tercera persona
@@ -37,6 +39,8 @@ conteos los pone el sistema, tu trabajo es el texto.
 3. licenciamiento.resumen: 1 o 2 párrafos con la lectura ejecutiva del consumo del periodo de facturación.
    Usa solo cifras que aparezcan en los datos y con el mismo valor. BYOC Cloud y los intentos outbound se
    evalúan contra su fair use (limite_fair_use), no contra lo prepagado: por debajo del fair use no hay sobreuso.
+   Cada licencia y recurso trae "estado" (Sobreuso, En rango, Cerca del límite, Bajo uso) calculado por el
+   sistema: úsalo tal cual y no atribuyas sobreuso a lo que no tenga estado "Sobreuso".
 4. licenciamiento.alertas: de 0 a 2 párrafos que expliquen qué implican las alertas listadas para el cliente
    (por ejemplo, revisar usuarios inactivos o ajustar lo contratado). Lista vacía si no hay alertas.
 Si licenciamiento es null, devuelve listas vacías en esa sección.
@@ -147,12 +151,49 @@ def construir_encargo(datos):
                 "partes_horas": [{"fecha": p["fecha"], "horas": p["horas"], "descripcion": p["descripcion"]} for p in t["partes_horas"]],
             } for t in s["tickets"]],
         },
-        "licenciamiento": None if not lic else {**{k: v for k, v in lic["kpis"].items() if k != "org_id"},
-                                                "alertas": lic["alertas"]},
+        "licenciamiento": None if not lic else {**kpis_para_redactar(lic["kpis"]), "alertas": lic["alertas"]},
     }
 
 
-def redactar_con_api(encargo, modelo):
+def kpis_para_redactar(k):
+    """KPIs con el estado de cada licencia y recurso ya calculado (el mismo de las tablas del informe).
+
+    BYOC y outbound se miden contra su fair use: no se manda lo prepagado de BYOC, que la IA leía
+    como límite («0 prepagado y 92,697.7 usados» → sobreuso inexistente).
+    """
+    def con_estado(d, disponible, usado, sobreuso):
+        return {**d, "estado": estado_recurso(disponible, usado, sobreuso, d.get("pct"))}
+
+    k = {c: v for c, v in k.items() if c != "org_id"}
+    k["licencias"] = [con_estado(x, x["contratadas"], x["en_uso"], x["sobreuso"]) for x in k["licencias"]]
+    k["addons"] = [con_estado(x, x["contratadas"], x["en_uso"], x["sobreuso"]) for x in k["addons"]]
+    k["dispositivos"] = [con_estado(x, x["contratadas"], x["en_uso"], x["sobreuso"]) for x in k.get("dispositivos") or []]
+    b = {c: v for c, v in k["byoc"].items() if c != "prepagado"}
+    k["byoc"] = con_estado(b, b["limite_fair_use"], b["usado"], b["excedente"]) if b["existe"] else b
+    i = k["ivr"]
+    k["ivr"] = con_estado(i, i["asignado"], i["usado"], i["bajo_demanda"]) if i["existe"] else i
+    k["recursos"] = [con_estado(r, r["comprometido"] + r["incluido"], r["en_uso"], r["sobreuso"]) for r in k["recursos"]]
+    k["storage"] = con_estado(k["storage"], k["storage"]["comprometido"], k["storage"]["en_uso"], k["storage"]["sobreuso"])
+    t = k["ia_tokens"]
+    k["ia_tokens"] = con_estado(t, t["prepagados"] + t["incluidos"], t["en_uso"], t["sobreuso"])
+    if k.get("outbound"):
+        o = k["outbound"]
+        k["outbound"] = con_estado(o, o["limite_fair_use"], o["intentos"], o["excedente"])
+    return k
+
+
+def turnos_correccion(anterior, problemas):
+    """Mensajes para pedir a la IA que corrija su redacción anterior con lo que encontró la revisión."""
+    if not anterior:
+        return []
+    previo = {k: anterior[k] for k in ("soporte", "licenciamiento")}
+    return [{"role": "assistant", "content": json.dumps(previo, ensure_ascii=False)},
+            {"role": "user", "content": "La revisión automática encontró estos problemas en tu redacción:\n- "
+             + "\n- ".join(problemas)
+             + "\nCorrígelos sin cambiar lo que está bien y devuelve el JSON completo con el mismo formato."}]
+
+
+def redactar_con_api(encargo, modelo, anterior=None, problemas=()):
     import anthropic
 
     # base_url explícito: si el generador corre dentro de otra herramienta que define
@@ -165,7 +206,7 @@ def redactar_con_api(encargo, modelo):
         fallbacks="default",
         output_config={"effort": "medium", "format": {"type": "json_schema", "schema": ESQUEMA}},
         system=INSTRUCCIONES,
-        messages=[{"role": "user", "content": json.dumps(encargo, ensure_ascii=False)}],
+        messages=[{"role": "user", "content": json.dumps(encargo, ensure_ascii=False)}] + turnos_correccion(anterior, problemas),
     )
     if respuesta.stop_reason == "refusal":
         raise RuntimeError("La API rechazó la solicitud de redacción; redactar con Claude Code o a mano.")
@@ -190,10 +231,11 @@ FORMATO_JSON = (
 )
 
 
-def redactar_con_deepseek(encargo, modelo, api_key, base_url="https://api.deepseek.com", intentos=3, timeout=300):
+def redactar_con_deepseek(encargo, modelo, api_key, base_url="https://api.deepseek.com", intentos=3, timeout=300,
+                          anterior=None, problemas=()):
     """Redacta con la API de DeepSeek (compatible con OpenAI). Reintenta con los errores de validación."""
     base = [{"role": "system", "content": INSTRUCCIONES + FORMATO_JSON},
-            {"role": "user", "content": json.dumps(encargo, ensure_ascii=False)}]
+            {"role": "user", "content": json.dumps(encargo, ensure_ascii=False)}] + turnos_correccion(anterior, problemas)
     mensajes, errores = base, []
     for intento in range(1, intentos + 1):
         texto = None
@@ -233,11 +275,15 @@ def redactar_con_deepseek(encargo, modelo, api_key, base_url="https://api.deepse
     raise RedaccionFallida(f"DeepSeek no devolvió textos válidos tras {intentos} intentos.", errores)
 
 
-def redactar(encargo, cfg):
-    """Redacta con el proveedor configurado (cfg.ia_provider)."""
+def redactar(encargo, cfg, anterior=None, problemas=()):
+    """Redacta con el proveedor configurado (cfg.ia_provider).
+
+    Con anterior + problemas, pide corregir la redacción anterior (autocorrección de generador.py).
+    """
     if cfg.ia_provider == "deepseek":
-        return redactar_con_deepseek(encargo, cfg.ia_model, cfg.deepseek_api_key, cfg.deepseek_base_url)
-    return redactar_con_api(encargo, cfg.ia_model)
+        return redactar_con_deepseek(encargo, cfg.ia_model, cfg.deepseek_api_key, cfg.deepseek_base_url,
+                                     anterior=anterior, problemas=problemas)
+    return redactar_con_api(encargo, cfg.ia_model, anterior=anterior, problemas=problemas)
 
 
 def escribir_encargo(carpeta, encargo):

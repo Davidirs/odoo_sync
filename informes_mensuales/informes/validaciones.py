@@ -20,8 +20,12 @@ NIEGA_SOBREUSO = re.compile(r"\bsin (?:\w+ ){0,2}(?:sobreuso|excedente|exced\w*)
 RESPALDO = ("conforme a lo acordado con el cliente", "completando la atención y validación correspondiente")
 
 
-def _r(nivel, tema, mensaje):
-    return {"nivel": nivel, "tema": tema, "mensaje": mensaje}
+def _r(nivel, tema, mensaje, corregible=False):
+    """corregible: problema de redacción que la IA puede corregir (ver problemas_redaccion)."""
+    r = {"nivel": nivel, "tema": tema, "mensaje": mensaje}
+    if corregible:
+        r["corregible"] = True
+    return r
 
 
 def _privacidad(texto):
@@ -92,21 +96,21 @@ def validar(datos, textos):
     for t in s["tickets"]:
         txt = resumenes.get(t["id"], "")
         if not txt or txt == PENDIENTE:
-            r.append(_r("error", f"Ticket #{t['id']}", "Sin resumen redactado."))
+            r.append(_r("error", f"Ticket #{t['id']}", "Sin resumen redactado.", True))
             continue
         if any(f in txt for f in RESPALDO):
-            r.append(_r("error", f"Ticket #{t['id']}", "Usa el texto genérico de respaldo; redactar un resumen real."))
+            r.append(_r("error", f"Ticket #{t['id']}", "Usa el texto genérico de respaldo; redactar un resumen real.", True))
         if t["en_curso"] and RESUELTO.search(txt):
             r.append(_r("error", f"Ticket #{t['id']}", f"Está en curso ({t['etapa']}) pero el resumen dice "
-                                                      f"«{RESUELTO.search(txt).group(0)}»."))
+                                                      f"«{RESUELTO.search(txt).group(0)}».", True))
         pii = _privacidad(txt)
         if pii:
-            r.append(_r("error", f"Ticket #{t['id']}", "Datos sensibles en el resumen: " + ", ".join(pii) + "."))
+            r.append(_r("error", f"Ticket #{t['id']}", "Datos sensibles en el resumen: " + ", ".join(pii) + ".", True))
         if len(txt) > 700:
             r.append(_r("aviso", f"Ticket #{t['id']}", f"Resumen largo ({len(txt)} caracteres)."))
     extras = set(resumenes) - {t["id"] for t in s["tickets"]}
     if extras:
-        r.append(_r("error", "Soporte", f"Hay resúmenes de tickets que no son del mes: {sorted(extras)}."))
+        r.append(_r("error", "Soporte", f"Hay resúmenes de tickets que no son del mes: {sorted(extras)}.", True))
 
     # --- Logo
     if not datos.get("logo"):
@@ -129,12 +133,12 @@ def validar(datos, textos):
                     + ("" if fin == esperado else f"; no termina en el mes del informe ({esperado})") + "."))
         narrativa = " ".join((textos.get("licenciamiento") or {}).get("resumen", []) + (textos.get("licenciamiento") or {}).get("alertas", []))
         if not narrativa.strip():
-            r.append(_r("error", "Licenciamiento", "Sin resumen ejecutivo redactado."))
+            r.append(_r("error", "Licenciamiento", "Sin resumen ejecutivo redactado.", True))
         else:
             conocidos = _valores_lic(lic) | {float(datos["anio"])}
             raros = sorted(n for n in _numeros(narrativa) if n >= 10 and n not in conocidos and round(n) not in conocidos)
             if raros:
-                r.append(_r("aviso", "Licenciamiento", f"Cifras del texto que no aparecen en los datos: {', '.join(f'{x:,.1f}' for x in raros)}."))
+                r.append(_r("aviso", "Licenciamiento", f"Cifras del texto que no aparecen en los datos: {', '.join(f'{x:,.1f}' for x in raros)}.", True))
             b = k["byoc"]
             # Oración por oración (el punto decimal de "92,697.7" no corta la oración).
             oraciones = re.split(r"(?<=[.!?;])\s+", narrativa)
@@ -143,12 +147,12 @@ def validar(datos, textos):
                              and not NIEGA_SOBREUSO.search(o)]
             if b["existe"] and not b["excedente"] and sobreuso_byoc:
                 r.append(_r("error", "Licenciamiento", f"El texto atribuye sobreuso a BYOC, pero está al {b['pct']}% de su fair use "
-                                                       f"({b['usado']:,.1f} de {b['limite_fair_use']:,.0f} min)."))
+                                                       f"({b['usado']:,.1f} de {b['limite_fair_use']:,.0f} min).", True))
             if any(a["nivel"] == "alta" for a in lic["alertas"]) and not re.search(r"sobreuso|exce|por encima", narrativa, re.I):
                 r.append(_r("aviso", "Licenciamiento", "Hay alertas de sobreuso que el resumen no menciona."))
             pii = _privacidad(narrativa)
             if pii:
-                r.append(_r("error", "Licenciamiento", "Datos sensibles en el texto: " + ", ".join(pii) + "."))
+                r.append(_r("error", "Licenciamiento", "Datos sensibles en el texto: " + ", ".join(pii) + ".", True))
         errores_hist = [h for h in lic.get("historico", []) if h.get("error")]
         if errores_hist:
             r.append(_r("aviso", "Licenciamiento", f"{len(errores_hist)} periodos del histórico no se pudieron consultar."))
@@ -168,6 +172,11 @@ def validar(datos, textos):
     origen = textos.get("origen", "sin textos")
     r.append(_r("ok" if textos else "error", "Redacción", f"Textos: {origen}."))
     return r
+
+
+def problemas_redaccion(datos, textos):
+    """Problemas de la redacción que se le devuelven a la IA para que los corrija (autocorrección)."""
+    return [x for x in validar(datos, textos) if x.get("corregible") and x["nivel"] != "ok"]
 
 
 def revisar_docx(ruta):

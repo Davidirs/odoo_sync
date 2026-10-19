@@ -24,3 +24,6 @@ anthropic = ["anthropic>=1.0"]
 # se leen desde esta carpeta (informes.config.RAIZ).
 [tool.setuptools]
 packages = ["informes"]
+
+[tool.setuptools.package-data]
+informes = ["*.bas"]

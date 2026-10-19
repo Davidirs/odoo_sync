@@ -69,9 +69,10 @@
     function enlacesArchivos(teamId, estado) {
         if (!estado) return "";
         const base = `/api/informes/${mesSeleccionado()}/${teamId}/archivo`;
+        const respaldo = estado.pdf_respaldo ? `<span class="inf-error-corto" title="Falló la actualización del índice; ver la revisión">PDF sin números en el índice</span>` : "";
         const pdf = estado.pdf
             ? `<a class="btn-secondary" href="${base}/pdf?ver=1" target="_blank" rel="noopener"><i data-lucide="file-text"></i> Ver PDF</a>
-               <a class="btn-secondary" href="${base}/pdf"><i data-lucide="download"></i> PDF</a>`
+               <a class="btn-secondary" href="${base}/pdf"><i data-lucide="download"></i> PDF</a>${respaldo}`
             : (estado.pdf_error ? `<span class="inf-error-corto" title="${esc(estado.pdf_error)}">PDF no generado</span>` : "");
         return `${pdf}<a class="btn-secondary" href="${base}/docx"><i data-lucide="file-type"></i> DOCX</a>`;
     }

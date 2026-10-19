@@ -9,6 +9,7 @@ from PIL import Image
 
 from . import graficas
 from .config import MESES, RAIZ
+from .license_manager import estado_recurso
 
 PLANTILLA = RAIZ / "plantilla" / "informe_esmt.docx"
 PENDIENTE = "[PENDIENTE DE REDACCIÓN]"
@@ -62,18 +63,6 @@ def logo_cuadrado(origen, destino):
     lienzo.paste(img, ((lado - img.width) // 2, (lado - img.height) // 2), img)
     lienzo.save(destino)
     return destino
-
-
-def _estado_recurso(disponible, usado, sobreuso, p):
-    if sobreuso or (not disponible and usado):
-        return "Sobreuso"
-    if p is None:
-        return "—"
-    if p >= 85:
-        return "Cerca del límite"
-    if p < 15:
-        return "Bajo uso"
-    return "En rango"
 
 
 # ------------------------------------------------------------------ secciones
@@ -134,7 +123,7 @@ def ctx_licenciamiento(lic):
         if not (disponible or usado):
             return
         filas.append({"nombre": nombre, "disponible_fmt": num(disponible) if disponible else "—",
-                      "en_uso_fmt": num(usado, dec), "pct_fmt": pct(p), "estado": _estado_recurso(disponible, usado, sobreuso, p)})
+                      "en_uso_fmt": num(usado, dec), "pct_fmt": pct(p), "estado": estado_recurso(disponible, usado, sobreuso, p)})
         grafica.append((corto or nombre, p if disponible else (float("inf") if usado else None)))
 
     for l in k["licencias"] + k["addons"]:

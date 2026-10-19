@@ -81,6 +81,19 @@ def _pct(usado, total):
     return round(usado / total * 100, 1) if total else None
 
 
+def estado_recurso(disponible, usado, sobreuso, p):
+    """Estado que se muestra en las tablas del informe y que recibe la IA (no lo deduce ella)."""
+    if sobreuso or (not disponible and usado):
+        return "Sobreuso"
+    if p is None:
+        return "—"
+    if p >= 85:
+        return "Cerca del límite"
+    if p < 15:
+        return "Bajo uso"
+    return "En rango"
+
+
 def licencias_nominales(licencias):
     """Nominales y concurrentes como los cuenta el dashboard (máx. entre contratado y usado)."""
     nominales = concurrentes = 0

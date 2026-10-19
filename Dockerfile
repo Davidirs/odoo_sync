@@ -2,12 +2,13 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Informe mensual en PDF: LibreOffice (solo Writer, sin interfaz) con soporte de macros Python
-# (actualiza el índice antes de exportar) y fuentes métricamente compatibles con las de Word:
-# Carlito ↔ Calibri, Liberation ↔ Times New Roman / Arial.
+# Informe mensual en PDF: LibreOffice (solo Writer, sin interfaz) y fuentes métricamente compatibles
+# con las de Word: Carlito ↔ Calibri, Liberation ↔ Times New Roman / Arial. La macro que actualiza el
+# índice es Basic: sin el script provider de Python, que traería un segundo libpython (el de Debian)
+# junto al de esta imagen.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libreoffice-writer-nogui libreoffice-script-provider-python \
+        libreoffice-writer-nogui \
         fonts-crosextra-carlito fonts-liberation fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 

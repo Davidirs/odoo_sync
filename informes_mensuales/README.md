@@ -24,11 +24,11 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # instala e
 cp .env.example .env   # y completar credenciales
 ```
 
-Para el PDF hace falta LibreOffice y fuentes métricamente compatibles con las de Word (si no, la paginación y el índice no coinciden con Word):
+Para el PDF hace falta LibreOffice y fuentes métricamente compatibles con las de Word (si no, la paginación y el índice no coinciden con Word). La macro que actualiza el índice es LibreOffice Basic (`informes/pdf_macro.bas`), sin dependencia del Python de LibreOffice. Si falla, se convierte el Word tal cual (índice sin números de página) y la revisión lo marca como aviso; la salida completa de LibreOffice queda en el log (stderr).
 
 ```bash
 brew install --cask libreoffice font-carlito font-liberation          # macOS
-apt-get install libreoffice-writer-nogui libreoffice-script-provider-python fonts-crosextra-carlito fonts-liberation   # Debian
+apt-get install libreoffice-writer-nogui fonts-crosextra-carlito fonts-liberation   # Debian
 ```
 
 ## Uso
@@ -56,7 +56,8 @@ Salida en `salida/AAAA-MM/<CLIENTE>/`:
 ## Qué decide el código y qué redacta la IA
 
 - **Código (determinista):** conteos, horas, días, estados, tablas, alertas de licenciamiento, fair use de BYOC/Outbound, disponibilidad e incidentes, y las frases con cifras (introducción, promedio, estados).
-- **IA (acotada):** el resumen de cada ticket, una frase de patrones del mes y la lectura ejecutiva del licenciamiento. No tiene acceso a herramientas ni credenciales; recibe JSON y devuelve JSON. Con DeepSeek (`IA_PROVIDER=deepseek`) la respuesta se valida contra el esquema y se reintenta con los errores; si sigue sin cuadrar, no hay texto de respaldo: el documento lleva «[PENDIENTE DE REDACCIÓN]», queda `redaccion_error.json` y la revisión sale en rojo.
+- **IA (acotada):** el resumen de cada ticket, una frase de patrones del mes y la lectura ejecutiva del licenciamiento. No tiene acceso a herramientas ni credenciales; recibe JSON y devuelve JSON. Con DeepSeek (`IA_PROVIDER=deepseek`) la respuesta se valida contra el esquema y se reintenta con los errores; si sigue sin cuadrar, no hay texto de respaldo: el documento lleva «[PENDIENTE DE REDACCIÓN]», queda `redaccion_error.json` y la revisión sale en rojo. La IA recibe el estado de cada licencia y recurso ya calculado (Sobreuso, En rango, Cerca del límite, Bajo uso; el mismo de las tablas).
+- **Autocorrección:** tras redactar (Claude o DeepSeek) se corren las validaciones de texto y, si encuentran algo (ticket en curso dado por resuelto, sobreuso de BYOC dentro del fair use, datos sensibles, cifras que no están en los datos, resumen pendiente o genérico), se le devuelven a la IA hasta 2 veces. Lo que siga mal queda en rojo en la revisión; el detalle queda en `textos.json` → `autocorreccion`.
 - **Validaciones:** sumas que cuadran, ningún ticket en curso descrito como resuelto, sin teléfonos/correos/IDs en los textos, cifras de la narrativa presentes en los datos, BYOC no llamado sobreuso si está dentro del fair use, periodo de facturación correcto, logo, región.
 
 ## Configuración

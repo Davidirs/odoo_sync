@@ -17,9 +17,11 @@ from .license_manager import LicenseManager, extraer_licenciamiento
 from .odoo import Odoo, extraer_soporte
 from .redaccion import RedaccionFallida, construir_encargo, errores_esquema, escribir_encargo, redactar
 from .render import renderizar
-from .validaciones import _r, escribir_revision, revisar_docx, semaforo, validar
+from .validaciones import _r, escribir_revision, problemas_redaccion, revisar_docx, semaforo, validar
 
 ETAPAS = ("datos", "textos", "docx", "pdf")
+# Rondas en que se le devuelven a la IA los problemas que encontró la revisión de su redacción.
+RONDAS_CORRECCION = 2
 
 
 def _nada(mensaje, pct=None):
@@ -122,9 +124,34 @@ def etapa_textos(cfg, carpeta, datos, rehacer, avance=_nada):
         guardar_json(carpeta / "redaccion_error.json", {"mensaje": str(e), "errores": e.errores,
                                                         "fecha": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         return None, f"pendiente: {e}"
+    textos = autocorregir(cfg, encargo, datos, textos, avance)
     guardar_json(ruta, textos)
     (carpeta / "redaccion_error.json").unlink(missing_ok=True)
     return textos, textos["origen"]
+
+
+def autocorregir(cfg, encargo, datos, textos, avance=_nada):
+    """Devuelve a la IA los problemas de su redacción (ticket en curso dado por resuelto, sobreuso de BYOC
+    dentro del fair use, cifras que no están en los datos…) hasta RONDAS_CORRECCION veces. Lo que siga
+    mal queda en la revisión, en rojo; nunca se sustituye por texto de respaldo."""
+    rondas = []
+    for ronda in range(1, RONDAS_CORRECCION + 1):
+        problemas = [f"{p['tema']}: {p['mensaje']}" for p in problemas_redaccion(datos, textos)]
+        if not problemas:
+            break
+        avance(f"Corrigiendo la redacción (ronda {ronda}: {len(problemas)} {'problema' if len(problemas) == 1 else 'problemas'})",
+               60 + 5 * ronda)
+        try:
+            corregidos = redactar(encargo, cfg, anterior=textos, problemas=problemas)
+        except RedaccionFallida as e:
+            rondas.append({"ronda": ronda, "problemas": problemas, "fallo": str(e)})
+            break
+        rondas.append({"ronda": ronda, "problemas": problemas})
+        textos = corregidos
+    if rondas:
+        pendientes = [f"{p['tema']}: {p['mensaje']}" for p in problemas_redaccion(datos, textos)]
+        textos = {**textos, "autocorreccion": {"rondas": rondas, "pendientes": pendientes}}
+    return textos
 
 
 def guardar_textos(carpeta, textos, origen):
@@ -148,29 +175,40 @@ def etapa_docx(cfg, carpeta, datos, anio, mes, cliente, avance=_nada):
     if fallo and not textos:
         detalle = "; ".join(fallo.get("errores") or [])[:400]
         resultados.append(_r("error", "Redacción", f"La IA no pudo redactar: {fallo['mensaje']}" + (f" ({detalle})" if detalle else "")))
-    escribir_revision(carpeta / "revision.md", datos, resultados, archivo)
+    return _guardar_revision(carpeta, datos, resultados, {"cliente": cliente.codigo, "archivo": archivo})
+
+
+def _guardar_revision(carpeta, datos, resultados, resumen):
+    escribir_revision(carpeta / "revision.md", datos, resultados, resumen["archivo"])
     guardar_json(carpeta / "revision.json", resultados)
-    resumen = {"cliente": cliente.codigo, "semaforo": semaforo(resultados), "archivo": archivo,
+    resumen = {**resumen, "semaforo": semaforo(resultados),
                "errores": sum(x["nivel"] == "error" for x in resultados),
                "avisos": sum(x["nivel"] == "aviso" for x in resultados)}
     guardar_json(carpeta / "_estado.json", resumen)
     return resumen
 
 
-def etapa_pdf(carpeta, resumen, avance=_nada):
-    """PDF con LibreOffice (índice actualizado). Un fallo aquí no invalida el Word."""
+def etapa_pdf(carpeta, resumen, datos, avance=_nada):
+    """PDF con LibreOffice (índice actualizado). Un fallo aquí no invalida el Word: queda como aviso."""
     from .pdf import docx_a_pdf
 
     avance("Convirtiendo a PDF (LibreOffice, índice con números de página)", 90)
     docx = carpeta / resumen["archivo"]
+    aviso = None
     try:
-        pdf = docx_a_pdf(docx, docx.with_suffix(".pdf"))
-        resumen = {**resumen, "pdf": pdf.name, "pdf_error": None}
+        r = docx_a_pdf(docx, docx.with_suffix(".pdf"))
+        resumen = {**resumen, "pdf": r["ruta"].name, "pdf_error": None, "pdf_respaldo": r["respaldo"]}
+        if r["respaldo"]:
+            aviso = _r("aviso", "PDF", "Se generó con la conversión directa de LibreOffice porque falló la actualización "
+                                       f"del índice: el índice del PDF no tiene números de página. ({r['detalle'][:300]})")
     except Exception as e:
         docx.with_suffix(".pdf").unlink(missing_ok=True)
-        resumen = {**resumen, "pdf": None, "pdf_error": str(e)}
-    guardar_json(carpeta / "_estado.json", resumen)
-    return resumen
+        resumen = {**resumen, "pdf": None, "pdf_error": str(e), "pdf_respaldo": False}
+        aviso = _r("aviso", "PDF", f"No se generó el PDF (el Word sí): {str(e)[:300]}")
+    resultados = [x for x in (leer_json(carpeta / "revision.json") or []) if x["tema"] != "PDF"]
+    if aviso:
+        resultados.append(aviso)
+    return _guardar_revision(carpeta, datos, resultados, resumen)
 
 
 def generar(cfg, cliente, anio, mes, etapas=ETAPAS, corte=None, corte_local=None, rehacer_textos=False,
@@ -190,7 +228,7 @@ def generar(cfg, cliente, anio, mes, etapas=ETAPAS, corte=None, corte_local=None
     if "docx" in etapas:
         resumen = etapa_docx(cfg, carpeta, datos, anio, mes, cliente, avance)
     if "pdf" in etapas and resumen:
-        resumen = etapa_pdf(carpeta, resumen, avance)
+        resumen = etapa_pdf(carpeta, resumen, datos, avance)
     revision_general(cfg, anio, mes)
     avance("Listo", 100)
     return {**(resumen or {}), "carpeta": str(carpeta), "textos_origen": origen, "datos": datos}
